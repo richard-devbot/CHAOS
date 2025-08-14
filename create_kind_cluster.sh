@@ -9,6 +9,7 @@ OPENAI_API_KEY=""
 ANTHROPIC_API_KEY=""
 GOOGLE_API_KEY=""
 DEVELOP="False"
+OLLAMA="False"
 
 #-----------------
 # analyze options
@@ -20,6 +21,7 @@ while [[ "$#" -gt 0 ]]; do
         -o|--openai-key) OPENAI_API_KEY="$2"; shift 2;;
         -a|--anthropic-key) ANTHROPIC_API_KEY="$2"; shift 2;;
         -g|--google-key) GOOGLE_API_KEY="$2"; shift 2;;
+        -l|--ollama) OLLAMA="True"; shift 1;;
         -d|--develop) DEVELOP="True"; shift 1;;
         *) echo "Unknown parameter passed: $1"; exit 1;;
     esac
@@ -99,6 +101,18 @@ PORT_FORWARD_PID=$!
 echo "Chaos Mesh dashboard is being port-forwarded at http://localhost:2333 in the background."
 echo "To stop the port-forward process, use: kill ${PORT_FORWARD_PID}"
 
+#-----------------------------------
+# launch ollama server if requested
+#-----------------------------------
+if [ "${OLLAMA}" = "True" ]; then
+    echo "Starting Ollama container..."
+    docker run -d \
+        --name ollama \
+        -p 11434:11434 \
+        -v ollama_data:/root/.ollama \
+        ollama/ollama:latest
+fi
+
 #-------------------------------
 # launch ChaosEater's container
 #-------------------------------
@@ -140,6 +154,29 @@ else
         chaos-eater/chaos-eater:1.0 \
         bash -c "redis-server --daemonize yes; streamlit run ChaosEater_demo.py --server.port ${PORT} --server.fileWatcherType none"
 fi
+# COMMON_RUN_OPTS=(
+#     -d --rm
+#     --name chaos-eater
+#     --network host
+#     -v .:/app
+#     -v "$HOME/.kube/config:/root/.kube/config"
+#     -v "$(which kubectl):/usr/local/bin/kubectl"
+#     -v "$(which skaffold):/usr/local/bin/skaffold"
+#     -v "$(which kind):/usr/local/bin/kind"
+#     -v "$HOME/.krew/bin/kubectl-graph:/root/.krew/bin/kubectl-graph"
+#     -v /var/run/docker.sock:/var/run/docker.sock
+#     -e "PATH=/root/.krew/bin:$PATH"
+#     -e "OPENAI_API_KEY=$OPENAI_API_KEY"
+#     -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
+#     -e "GOOGLE_API_KEY=$GOOGLE_API_KEY"
+# )
+# if [ "${DEVELOP}" = "True" ]; then
+#   COMMON_RUN_OPTS+=(-v /workspace:/workspace)
+#   RUN_CMD='bash -c "redis-server --daemonize yes && tail -f /dev/null"'
+# else
+#   RUN_CMD='bash -c "redis-server --daemonize yes; streamlit run ChaosEater_demo.py --server.port '"${PORT}"' --server.fileWatcherType none"'
+# fi
+# docker run "${COMMON_RUN_OPTS[@]}" chaos-eater/chaos-eater:1.0 ${RUN_CMD}
 
 #----------
 # epilogue

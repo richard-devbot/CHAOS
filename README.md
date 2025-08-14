@@ -56,6 +56,7 @@ docker build -f docker/Dockerfile_sandbox -t chaos-eater/kind-in-dind-sandbox:0.
 ```
 
 ### 2. Launch the container
+First, launch the dind container in the background.
 ```
 docker run --rm \
            --name chaos-eater \
@@ -64,12 +65,16 @@ docker run --rm \
            -p <port>:<port> \
            -p 2333:2333 \
            chaos-eater/kind-in-dind-sandbox:0.1
+```
+Then, create a kind cluster inside the dind container with the following command. If you want to use local LLMs via Ollama, add ```--ollama``` option when running it.
+```
 docker exec -it chaos-eater bash -c "
     /usr/local/bin/entrypoint.sh -p <port> \
                                  --openai-key <your-openai-api-key> \
                                  --anthropic-key <your-anthropic-api-key> \
                                  --google-key <your-gemini-api-key>"
 ```
+
 
 ### 3. Access the ChaosEater WebGUI
 Access ```localhost:<port>``` in your browser. Now, you can try the ChaosEater GUI in your browser!  
@@ -103,6 +108,7 @@ docker build -f docker/Dockerfile_sandbox -t chaos-eater/kind-in-dind-sandbox:0.
 ```
 
 ### 2. Launch the dind container in development mode
+First, launch the dind container in the background.
 ```
 docker run --rm \
            --name chaos-eater-dev \
@@ -112,6 +118,9 @@ docker run --rm \
            -p 2333:2333 \
            -v <path-to-this-repo>:/workspace \
            chaos-eater/kind-in-dind-sandbox:0.1
+```
+Then, create a kind cluster inside the dind container with the following command. Note that ```--develop``` option is added here. If you want to use local LLMs via Ollama, add ```--ollama``` option when running it.
+```
 docker exec -it chaos-eater-dev bash -c "
     /usr/local/bin/entrypoint.sh --develop \
                                  --openai-key <your-openai-api-key> \
@@ -223,10 +232,10 @@ The details of the GUI controls are as follows.
 </summary>
 
 > **⚠️WARNING**  
-> The current ChaosEater supports only GPT-4o (you can use Claude and Gemini, but they cannot complete CE cycles). We plan to add support for Claude and Gemini as soon as possible.
+> ChaosEater supports GPT, Gemini, Claude, and local LLMs (Ollama). However, Its behavior may be unstable with models other than GPT-4o. We are currently working to improve stability in the other LLMs.
 
 You may change the LLMs used by ChaosEater from the ```model``` dropdown button.
-The currently supported LLMs are GPT-4o (```openai/gpt-4o-2024-08-06```, ```openai/gpt-4o-2024-05-13```), Claude (```claude-3-5-sonnet-20240620```), Gemini (```google/gemini-1.5-pro```). 
+Preset LLMs include ```openai/gpt-4o-2024-08-06```,```anthropic/claude-3-5-sonnet-20240620```, ```google/gemini-1.5-pro```, ```ollama/qwen3:32b```. If you want to use a different LLM, select ```custom``` and directry enter your preferred LLM in the popup text box. The format should be provider/model_name.
 </details>
 
 <details>
@@ -377,17 +386,19 @@ Our code is licenced by NTT. Basically, the use of our code is limitted to resea
 ChaosEater is built upon numerous excellect projects. Big thank you to the following projects! (A-Z):
 - [Anthropic API](https://www.anthropic.com/api)
 - [Chaos Mesh](https://github.com/chaos-mesh/chaos-mesh)
+- [Docker](https://github.com/docker)
 - [Gemini API](https://ai.google.dev/)
-- [Hugging Face + its community](https://huggingface.co/)
+- [Hugging Face](https://huggingface.co/)
 - [k6](https://github.com/grafana/k6)
 - [kind](https://github.com/kubernetes-sigs/kind)
-- [kubectl graph](https://github.com/steveteuber/kubectl-graph)
 - [Kubernetes](https://github.com/kubernetes/kubernetes)
 - [LangChain](https://github.com/langchain-ai/langchain)
+- [Ollama](https://github.com/ollama/ollama)
 - [OpenAI API](https://openai.com/index/openai-api/)
 - [Skaffold](https://github.com/GoogleContainerTools/skaffold)
 - [Streamlit](https://github.com/streamlit/streamlit)
 - All other related projects
+<!-- - [kubectl graph](https://github.com/steveteuber/kubectl-graph) -->
 
 ## 🤝 Citations
 If you find this work useful, please cite our paper as follows:

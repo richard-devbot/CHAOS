@@ -1,16 +1,26 @@
+import requests
 from typing import List, Tuple, Callable, Iterator
 
 import tiktoken
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_anthropic import ChatAnthropic
+from langchain_ollama import ChatOllama
 from langchain.prompts import ChatPromptTemplate
 from langchain_core.runnables.base import Runnable
 from langchain_core.output_parsers import JsonOutputParser
 from langchain.callbacks.base import BaseCallbackHandler
 from langchain.schema import LLMResult
 
+from .exceptions import ModelNotFoundError
 from .wrappers import LLM, LLMBaseModel, BaseModel
+
+
+def verify_model_name(model_name: str) -> bool:
+    resp = requests.get(f"http://localhost:11434/api/tags")
+    resp.raise_for_status()
+    data = resp.json()
+    return any(model.get("name") == model_name for model in data.get("models", []))
 
 
 def load_llm(
@@ -18,7 +28,7 @@ def load_llm(
     temperature: float = 0.0,
     port: int = 8000,
     seed: int = 42,
-) -> Runnable:
+) -> LLM:
     if model_name.startswith("openai/"):
         return ChatOpenAI(
             model=model_name.split("openai/", 1)[1],
@@ -40,6 +50,16 @@ def load_llm(
             max_tokens=8192
             # model_kwargs=model_kwargs
         )
+    elif model_name.startswith("ollama/"):
+        model_exists = verify_model_name(model_name.split("ollama/", 1)[1])
+        if model_exists:
+            return ChatOllama(
+                model=model_name.split("ollama/", 1)[1],
+                temperature=temperature,
+                seed=seed
+            )
+        else:
+            raise ModelNotFoundError(f"{model_name} was not found in the available list.")
     else:
         # Note: VLLMOpenAI is for base models
         #       ref: https://python.langchain.com/v0.2/docs/integrations/chat/vllm/
@@ -51,7 +71,7 @@ def load_llm(
             max_tokens=2048,
             model_kwargs={"seed": seed}
         )
-    
+
 
 def build_json_agent(
     llm: LLM,
@@ -161,13 +181,15 @@ class LoggingCallback(BaseCallbackHandler):
             elif "claude" in self.model_name:
                 self.model_provider = "anthropic"
             else:
-                raise TypeError(f"Invalid model name: {self.model_name}")
+                # raise TypeError(f"Invalid model name: {self.model_name}") # TODO: Implement more appropriate error handling.
+                self.model_provider = "ollama"
         elif "model_name" in list(llm.__fields__.keys()):
             self.model_name = llm.model_name
             if "gpt" in self.model_name:
                 self.model_provider = "openai"
             else:
-                raise TypeError(f"Invalid model name: {self.model_name}")
+                # raise TypeError(f"Invalid model name: {self.model_name}") # TODO: Implement more appropriate error handling.
+                self.model_provider = "ollama"
         else:
             raise TypeError(f"Invalid llm: {llm}")
         self.streaming = streaming

@@ -2,6 +2,7 @@ import os
 import time
 import yaml
 import zipfile
+import subprocess
 
 import streamlit as st
 import redis
@@ -17,6 +18,7 @@ from chaos_eater.utils.functions import get_timestamp, type_cmd, is_binary
 from chaos_eater.utils.k8s import remove_all_resources_by_namespace
 from chaos_eater.utils.schemas import File
 from chaos_eater.utils.constants import CHAOSEATER_IMAGE_PATH, CHAOSEATER_LOGO_PATH, CHAOSEATER_ICON, CHAOSEATER_IMAGE
+from chaos_eater.utils.exceptions import ModelNotFoundError
 
 # for debug
 from langchain.globals import set_verbose
@@ -41,6 +43,17 @@ REQUEST_URL_INSTRUCTIONS = """
   6. http://front-end.sock-shop.svc.cluster.local/basket.html"""
 
 
+@st.experimental_dialog("Confirm Pulling Model")
+def pull_model(model_name: str):
+    st.write(f"The specified model: {model_name} was not found in the available model list. Do you want to pull it?")
+    if st.button("Pull the model"):
+        print(f"{model_name}")
+        subprocess.run(
+            ["docker", "exec", "-it", "ollama", "ollama", "pull", model_name.split("ollama/", 1)[1]],
+            check=True
+        )
+        st.rerun()
+
 def init_choaseater(
     model_name: str = "openai/gpt-4o",
     temperature: float = 0.0,
@@ -51,12 +64,22 @@ def init_choaseater(
     # if st.session_state.openai_key == "":
     #     return
     # os.environ['OPENAI_API_KEY'] = st.session_state.openai_key
-    llm = load_llm(
-        model_name=model_name, 
-        temperature=temperature,
-        port=port,
-        seed=seed
-    )
+    try:
+        llm = load_llm(
+            model_name=model_name, 
+            temperature=temperature,
+            port=port,
+            seed=seed
+        )
+    except ModelNotFoundError:
+        pull_model(model_name)
+        llm = load_llm(
+            model_name=model_name, 
+            temperature=temperature,
+            port=port,
+            seed=seed
+        )
+
     st.session_state.chaoseater = ChaosEater(
         llm=llm,
         ce_tool=CETool.init(CEToolType.chaosmesh),
@@ -64,6 +87,7 @@ def init_choaseater(
         namespace=NAMESPACE
     )
     st.session_state.model_name = model_name
+    st.session_state.temperature = temperature
     st.session_state.seed = seed
 
 
@@ -119,19 +143,22 @@ def main():
             #-----------------
             # model selection
             #-----------------
-            model_name = st.selectbox(
+            selected_model = st.selectbox(
                 "Model", 
                 (
                     "openai/gpt-4o-2024-08-06",
-                    # "openai/gpt-4o-2024-05-13",
-                    # "openai/gpt-4o-mini",
                     "google/gemini-1.5-pro-latest",
-                    # "google/gemini-1.5-pro",
                     "anthropic/claude-3-5-sonnet-20241022",
-                    # "anthropic/claude-3-5-sonnet-20240620",
-                    # "meta-llama/Meta-Llama-3-70B-Instruct"
+                    "ollama/qwen3:32b",
+                    "custom"
                 )
             )
+            if selected_model == "custom":
+                model_name = st.text_input("Enter custom model name")
+                if model_name is None:
+                    model_name = "openai/gpt-4o-2024-08-06"
+            else:
+                model_name = selected_model
             if model_name.startswith("openai"):
                 st.text_input(
                     label="API keys",
@@ -196,7 +223,12 @@ def main():
     # initialize chaos eater
     #------------------------
     # initialization
-    if "chaoseater" not in st.session_state or model_name != st.session_state.model_name or seed != st.session_state.seed or temperature != st.session_state.temperature:
+    if (
+        "chaoseater" not in st.session_state
+        or model_name != st.session_state.model_name
+        or seed != st.session_state.seed
+        or temperature != st.session_state.temperature
+    ):
         init_choaseater(
             model_name=model_name,
             seed=seed,
