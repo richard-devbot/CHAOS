@@ -2,7 +2,7 @@ from typing import List, Dict, Any
 
 import streamlit as st
 
-from .functions import limit_string_length
+from .functions import limit_string_length, MessageLogger
 
 
 # stand-alone spiner in streamlit
@@ -22,6 +22,56 @@ class Spinner:
         next(self._spinner, None)
         if text is not None:
             self.empty.write(text)
+
+class StreamlitPlaceholder:
+    def __init__(self):
+        self.placeholder = st.empty()
+        self.content = ""
+
+    def write(self, text: str) -> None:
+        self.placeholder.write(text)
+        self.content = text
+
+    def code(self, text: str) -> None:
+        self.placeholder.code(text)
+        self.content = text
+
+class StreamlitLogger(MessageLogger):
+    def write(self, text: str) -> None:
+        self.messages.append({
+            "type": "write",
+            "content": text
+        })
+        st.write(text)
+
+    def code(
+        self,
+        code: str,
+        language: str = None
+    ) -> None:
+        self.messages.append({
+            "type": "code",
+            "content": code,
+            "language": language
+        })
+        st.code(code, language=language)
+
+    def placeholder(self) -> StreamlitPlaceholder:
+        placeholder = StreamlitPlaceholder()
+        self.messages.append({
+            "type": "placeholder",
+            "content": placeholder
+        })
+        return placeholder
+    
+    def display_history(self) -> None:
+        for message in self.messages:
+            if message["type"] == "write":
+                st.write(message["content"])
+            elif message["type"] == "code":
+                st.code(message["content"], message["language"])
+            elif message["type"] == "placeholder":
+                st.write(message["content"].content)
 
 
 class StreamlitDisplayHandler:

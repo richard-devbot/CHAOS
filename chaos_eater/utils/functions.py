@@ -474,7 +474,15 @@ def run_command(
             raise subprocess.CalledProcessError(process.returncode, cmd, error_output)
         
         display_handler.on_success("".join(all_output))
-        
+
     except Exception as e:
         display_handler.on_error(str(e))
         raise RuntimeError(e)
+
+class MessageLogger:
+    def __init__(self):
+        self.messages = []
+    
+    def save(self, filepath: str):
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(self.messages, f, ensure_ascii=False, indent=2)

@@ -19,6 +19,7 @@ from chaos_eater.utils.k8s import remove_all_resources_by_namespace
 from chaos_eater.utils.schemas import File
 from chaos_eater.utils.constants import CHAOSEATER_IMAGE_PATH, CHAOSEATER_LOGO_PATH, CHAOSEATER_ICON, CHAOSEATER_IMAGE
 from chaos_eater.utils.exceptions import ModelNotFoundError
+from chaos_eater.utils.streamlit import StreamlitLogger
 
 # for debug
 from langchain.globals import set_verbose
@@ -82,6 +83,7 @@ def init_choaseater(
 
     st.session_state.chaoseater = ChaosEater(
         llm=llm,
+        message_logger=st.session_state.message_logger,
         ce_tool=CETool.init(CEToolType.chaosmesh),
         work_dir=WORK_DIR,
         namespace=NAMESPACE
@@ -116,6 +118,8 @@ def main():
         st.session_state.seed = 42
     if "temperature" not in st.session_state:
         st.session_state.temperature = 0.0
+    if "message_logger" not in st.session_state:
+        st.session_state.message_logger = StreamlitLogger()
 
     #--------------
     # CSS settings
@@ -400,6 +404,11 @@ def main():
                 st.text("")
     else:
         app_utils.apply_remove_example_bottomspace()
+
+    #--------------
+    # chat history
+    #--------------
+    st.session_state.message_logger.display_history()
 
     #--------------
     # current chat

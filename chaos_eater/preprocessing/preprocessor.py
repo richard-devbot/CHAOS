@@ -3,24 +3,22 @@ import subprocess
 import yaml
 from typing import List, Tuple, Optional
 
-import streamlit as st
-
 from .llm_agents.k8s_summary_agent import K8sSummaryAgent
 from .llm_agents.k8s_weakness_summary_agent import K8sWeaknessSummaryAgent
 from .llm_agents.k8s_app_assuption_agent import K8sAppAssumptionAgent, K8sAppAssumption
 from .llm_agents.ce_instruct_agent import CEInstructAgent
+from ..utils.wrappers import LLM, BaseModel
+from ..utils.schemas import File
+from ..utils.k8s import wait_for_resources_ready
+from ..utils.llms import LLMLog
+from ..utils.streamlit import StreamlitDisplayHandler, Spinner
 from ..utils.functions import (
     write_file,
     save_json,
     recursive_to_dict,
-    run_command
+    run_command,
+    MessageLogger
 )
-from ..utils.wrappers import LLM, BaseModel
-from ..utils.streamlit import StreamlitDisplayHandler, Spinner
-from ..utils.schemas import File
-from ..utils.k8s import wait_for_resources_ready
-from ..utils.llms import LLMLog
-
 
 INPUT_TEMPLATE = """\
 K8s manifest: {k8s_yaml_name}
@@ -78,12 +76,17 @@ class ProcessedData(BaseModel):
 
 
 class PreProcessor:
-    def __init__(self, llm: LLM) -> None:
+    def __init__(
+        self,
+        llm: LLM,
+        message_logger: MessageLogger
+    ) -> None:
         self.llm = llm
-        self.k8s_summary_agent          = K8sSummaryAgent(llm)
-        self.k8s_weakness_summary_agent = K8sWeaknessSummaryAgent(llm)
-        self.k8s_app_assumption_agent   = K8sAppAssumptionAgent(llm)
-        self.ce_instruct_agent          = CEInstructAgent(llm)
+        self.message_logger = message_logger
+        self.k8s_summary_agent          = K8sSummaryAgent(llm, message_logger)
+        self.k8s_weakness_summary_agent = K8sWeaknessSummaryAgent(llm, message_logger)
+        self.k8s_app_assumption_agent   = K8sAppAssumptionAgent(llm, message_logger)
+        self.ce_instruct_agent          = CEInstructAgent(llm, message_logger)
 
     def process(
         self,
@@ -127,10 +130,10 @@ class PreProcessor:
         )
 
         # deploy the resources using skaffold
-        st.write("##### K8s manifest(s) to be deployed:")
+        self.message_logger.write("##### K8s manifest(s) to be deployed:")
         for k8s_yaml in k8s_yamls:
-            st.write(f"```{k8s_yaml.fname}```")
-            st.code(k8s_yaml.content)
+            self.message_logger.write(f"```{k8s_yaml.fname}```")
+            self.message_logger.code(k8s_yaml.content)
         if is_new_deployment:
             spinner = Spinner(f"##### Deploying resources...")
             try:
@@ -146,7 +149,7 @@ class PreProcessor:
         # wait for all the resources to be deployed
         wait_for_resources_ready(label_selector=f"project={project_name}", context=kube_context)
         # display each resouce status
-        st.write("##### Resource statuses")
+        self.message_logger.write("##### Resource statuses")
         run_command(
             cmd=f"kubectl get all --all-namespaces --context {kube_context} --selector=project={project_name}",
             display_handler=StreamlitDisplayHandler()
@@ -155,14 +158,14 @@ class PreProcessor:
         #-----------------------------
         # summarize each k8s manifest
         #-----------------------------
-        st.write("##### Summary of each manifest:")
+        self.message_logger.write("##### Summary of each manifest:")
         summary_log, k8s_summaries = self.k8s_summary_agent.summarize_manifests(k8s_yamls=k8s_yamls)
         log.append(summary_log)
 
         #-----------------------------------------
         # summarize weakness points in the system
         #-----------------------------------------
-        st.write("##### Resiliency issuses/weaknesses in the manifests:")
+        self.message_logger.write("##### Resiliency issuses/weaknesses in the manifests:")
         weakness_log, k8s_weakness_summary = self.k8s_weakness_summary_agent.summarize_weaknesses(k8s_yamls=k8s_yamls)
         log.append(weakness_log)
 
@@ -179,7 +182,7 @@ class PreProcessor:
         # )
         # log.append(depdency_token_usage)
 
-        st.write("##### Application of the manifests:")
+        self.message_logger.write("##### Application of the manifests:")
         #---------------------------------------------
         # assume the application of the k8s manifests
         #---------------------------------------------
@@ -189,7 +192,7 @@ class PreProcessor:
         )
         log.append(app_token_usage)
 
-        st.write("##### Summary of your instructions for Chaos Engineering:")
+        self.message_logger.write("##### Summary of your instructions for Chaos Engineering:")
         #----------------------------------------------
         # summarize instructions for Chaos Engineering
         #----------------------------------------------
@@ -198,7 +201,7 @@ class PreProcessor:
             log.append(instruct_token_usage)
         else:
             ce_instructions = ""
-            st.write("No Chaos-Engineering instructions are provided.")
+            self.message_logger.write("No Chaos-Engineering instructions are provided.")
 
         #----------
         # epilogue

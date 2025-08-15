@@ -1,10 +1,9 @@
 from typing import List, Tuple
 
-import streamlit as st
-
 from ...utils.wrappers import LLM, BaseModel, Field
 from ...utils.llms import build_json_agent, LoggingCallback, LLMLog
 from ...utils.schemas import File
+from ...utils.functions import MessageLogger
 
 
 #---------
@@ -42,18 +41,26 @@ class K8sIssues(BaseModel):
 # agent definition
 #------------------
 class K8sWeaknessSummaryAgent:
-    def __init__(self, llm: LLM) -> None:
+    def __init__(
+        self,
+        llm: LLM,
+        message_logger: MessageLogger
+    ) -> None:
         self.llm = llm
+        self.message_logger = message_logger
         self.agent = build_json_agent(
             llm=llm,
-            chat_messages=[("system", SYS_SUMMARIZE_K8S_WEAKNESSES), ("human", USER_SUMMARIZE_K8S_WEAKNESSES)],
+            chat_messages=[
+                ("system", SYS_SUMMARIZE_K8S_WEAKNESSES),
+                ("human", USER_SUMMARIZE_K8S_WEAKNESSES)
+            ],
             pydantic_object=K8sIssues,
             is_async=False
         )
 
     def summarize_weaknesses(self, k8s_yamls: List[File]) -> Tuple[LLMLog, str]:
         self.logger = LoggingCallback(name="k8s_summary", llm=self.llm)
-        container = st.empty()
+        container = self.message_logger.placeholder()
         for output in self.agent.stream(
             {"k8s_yamls": self.get_k8s_yamls_str(k8s_yamls)},
             {"callbacks": [self.logger]}

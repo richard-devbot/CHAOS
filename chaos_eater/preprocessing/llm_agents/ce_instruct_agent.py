@@ -1,9 +1,8 @@
 from typing import Tuple
 
-import streamlit as st
-
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField
 from ...utils.llms import build_json_agent, LoggingCallback, LLMLog
+from ...utils.functions import MessageLogger
 
 
 SYS_SUMMARIZE_CE_INSTRUCTIONS = """\
@@ -36,19 +35,27 @@ class CEInstructions(LLMBaseModel):
 
 
 class CEInstructAgent:
-    def __init__(self, llm: LLM) -> None:
+    def __init__(
+        self,
+        llm: LLM,
+        message_logger: MessageLogger
+    ) -> None:
         self.llm = llm
+        self.message_logger = message_logger
         self.agent = build_json_agent(
             llm=llm,
-            chat_messages=[("system", SYS_SUMMARIZE_CE_INSTRUCTIONS), ("human", USER_SUMMARIZE_CE_INSTRUCTIONS)],
+            chat_messages=[
+                ("system", SYS_SUMMARIZE_CE_INSTRUCTIONS),
+                ("human", USER_SUMMARIZE_CE_INSTRUCTIONS)
+            ],
             pydantic_object=CEInstructions,
             is_async=False
         )
 
     def summarize_ce_instructions(self, ce_instructions: str) -> Tuple[LLMLog, str]:
         logger = LoggingCallback(name="ce_instruction_summary", llm=self.llm)
-        container = st.empty()
+        placeholder = self.message_logger.placeholder()
         for summary in self.agent.stream({"ce_instructions": ce_instructions}, {"callbacks": [logger]}):
             if (summary_str := summary.get("ce_instructions")) is not None:
-                container.write(summary_str)
+                placeholder.write(summary_str)
         return logger.log, summary_str

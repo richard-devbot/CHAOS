@@ -1,11 +1,9 @@
 from typing import List, Tuple
 
-import streamlit as st
-
 from ...utils.wrappers import LLM, BaseModel, Field
 from ...utils.llms import build_json_agent, LoggingCallback, LLMLog
 from ...utils.schemas import File
-from ...utils.functions import file_to_str
+from ...utils.functions import file_to_str, MessageLogger
 
 
 #---------
@@ -36,11 +34,19 @@ class K8sSummary(BaseModel):
 # agent definition
 #------------------
 class K8sSummaryAgent:
-    def __init__(self, llm: LLM) -> None:
+    def __init__(
+        self,
+        llm: LLM,
+        message_logger: MessageLogger
+    ) -> None:
         self.llm = llm
+        self.message_logger = message_logger
         self.agent = build_json_agent(
             llm=llm,
-            chat_messages=[("system", SYS_SUMMARIZE_K8S), ("human", USER_SUMMARIZE_K8S)],
+            chat_messages=[
+                ("system", SYS_SUMMARIZE_K8S),
+                ("human", USER_SUMMARIZE_K8S)
+            ],
             pydantic_object=K8sSummary,
             is_async=False
         )
@@ -49,8 +55,8 @@ class K8sSummaryAgent:
         self.logger = LoggingCallback(name="k8s_summary", llm=self.llm)
         summaries = []
         for k8s_yaml in k8s_yamls:
-            st.write(f"```{k8s_yaml.fname}```")
-            container = st.empty()
+            self.message_logger.write(f"```{k8s_yaml.fname}```")
+            placeholder = self.message_logger.placeholder()
             for summary in self.agent.stream(
                 {"k8s_yaml": file_to_str(k8s_yaml)}, 
                 {"callbacks": [self.logger]}
@@ -59,5 +65,5 @@ class K8sSummaryAgent:
                     pass
                     # container.write(summary_str)
             summaries.append(summary_str)
-            container.write(summary_str)
+            placeholder.write(summary_str)
         return self.logger.log, summaries

@@ -1,10 +1,9 @@
 from typing import List, Tuple
 
-import streamlit as st
-
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField
 from ...utils.llms import build_json_agent, LoggingCallback, LLMLog
 from ...utils.schemas import File
+from ...utils.functions import MessageLogger
 
 
 SYS_ASSUME_K8S_APP = """\
@@ -35,11 +34,19 @@ class K8sAppAssumption(LLMBaseModel):
 
 
 class K8sAppAssumptionAgent:
-    def __init__(self, llm: LLM) -> None:
+    def __init__(
+        self,
+        llm: LLM,
+        message_logger: MessageLogger
+    ) -> None:
         self.llm = llm
+        self.message_logger = message_logger
         self.agent = build_json_agent(
             llm=llm,
-            chat_messages=[("system", SYS_ASSUME_K8S_APP), ("human", USER_ASSUME_K8S_APP)],
+            chat_messages=[
+                ("system", SYS_ASSUME_K8S_APP),
+                ("human", USER_ASSUME_K8S_APP)
+            ],
             pydantic_object=K8sAppAssumption,
             is_async=False
         )
@@ -50,10 +57,10 @@ class K8sAppAssumptionAgent:
         k8s_summaries: List[str]
     ) -> Tuple[LLMLog, K8sAppAssumption]:
         logger = LoggingCallback(name="k8s_app", llm=self.llm)
-        st.write("Thoughts:")
-        container = st.empty()
-        st.write("Assumed application:")
-        container2 = st.empty()
+        self.message_logger.write("Thoughts:")
+        container = self.message_logger.placeholder()
+        self.message_logger.write("Assumed application:")
+        container2 = self.message_logger.placeholder()
         user_input = self.get_user_input(
             k8s_yamls=k8s_yamls,
             k8s_summaries=k8s_summaries

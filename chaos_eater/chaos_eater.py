@@ -13,6 +13,11 @@ from .improvement.improver import Improver
 from .postprocessing.postprocessor import PostProcessor, ChaosCycle
 from .ce_tools.ce_tool_base import CEToolBase
 from .utils.constants import SKAFFOLD_YAML_TEMPLATE_PATH
+from .utils.wrappers import BaseModel, LLM
+from .utils.llms import LLMLog, PRICING_PER_TOKEN
+from .utils.streamlit import StreamlitDisplayHandler, Spinner
+from .utils.k8s import remove_all_resources_by_labels, remove_all_resources_by_namespace
+from .utils.schemas import File
 from .utils.functions import (
     write_file,
     delete_file,
@@ -22,12 +27,8 @@ from .utils.functions import (
     run_command,
     render_jinja_template,
     list_to_bullet_points,
+    MessageLogger
 )
-from .utils.wrappers import BaseModel, LLM
-from .utils.llms import LLMLog, PRICING_PER_TOKEN
-from .utils.streamlit import StreamlitDisplayHandler, Spinner
-from .utils.k8s import remove_all_resources_by_labels, remove_all_resources_by_namespace
-from .utils.schemas import File
 
 
 class ChaosEaterOutput(BaseModel):
@@ -61,6 +62,7 @@ class ChaosEater:
         self,
         llm: LLM,
         ce_tool: CEToolBase,
+        message_logger: MessageLogger,
         work_dir: str = "sandbox",
         namespace: str = "chaos-eater"
     ) -> None:
@@ -71,10 +73,12 @@ class ChaosEater:
         self.namespace = namespace
         # llm
         self.llm = llm
+        # message_logger
+        self.message_logger = message_logger
         # CE tool
         self.ce_tool = ce_tool
-        # agents
-        self.preprocessor  = PreProcessor(llm)
+        # agent managers
+        self.preprocessor  = PreProcessor(llm, self.message_logger)
         self.hypothesizer  = Hypothesizer(llm, ce_tool)
         self.experimenter  = Experimenter(llm, ce_tool, namespace=namespace)
         self.analyzer      = Analyzer(llm, namespace)
