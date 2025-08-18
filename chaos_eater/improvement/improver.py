@@ -9,7 +9,7 @@ from ..hypothesis.hypothesizer import Hypothesis
 from ..preprocessing.preprocessor import ProcessedData
 from ..utils.wrappers import LLM
 from ..utils.llms import LLMLog
-from ..utils.functions import save_json, recursive_to_dict
+from ..utils.functions import save_json, recursive_to_dict, MessageLogger
 from ..utils.schemas import File
 
 
@@ -18,14 +18,16 @@ class Improver:
         self,
         llm: LLM,
         ce_tool: CEToolBase,
+        message_logger: MessageLogger,
         work_dir: str = "sandbox"
     ) -> None:
         # llm
         self.llm = llm
         self.ce_tool = ce_tool
+        self.message_logger = message_logger
         self.work_dir = work_dir
         # modify k8s yaml
-        self.agent = ReconfigurationAgent(llm)
+        self.agent = ReconfigurationAgent(llm, message_logger)
 
     def reconfigure(
         self,

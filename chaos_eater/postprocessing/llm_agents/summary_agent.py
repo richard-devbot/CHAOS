@@ -1,7 +1,5 @@
 from typing import List, Tuple, Optional
 
-import streamlit as st
-
 from ...analysis.analyzer import Analysis
 from ...experiment.experimenter import ChaosExperiment, ChaosExperimentResult
 from ...hypothesis.hypothesizer import Hypothesis
@@ -9,7 +7,7 @@ from ...improvement.improver import ReconfigurationResult
 from ...preprocessing.preprocessor import ProcessedData
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField, BaseModel
 from ...utils.llms import build_json_agent, LLMLog, LoggingCallback
-from ...utils.functions import int_to_ordinal
+from ...utils.functions import int_to_ordinal, MessageLogger
 
 
 CHAOS_CYCLE_OVERVIEW = """\
@@ -105,8 +103,13 @@ class CECycleSummary(LLMBaseModel):
 
 
 class SummaryAgent:
-    def __init__(self, llm: LLM) -> None:
+    def __init__(
+        self,
+        llm: LLM,
+        message_logger: MessageLogger
+    ) -> None:
         self.llm = llm
+        self.message_logger = message_logger
         self.agent = build_json_agent(
             llm=llm,
             chat_messages=[("system", SYS_SUMMARY_CYCLE), ("human", USER_SUMMARY_CYCLE)],
@@ -116,7 +119,8 @@ class SummaryAgent:
     
     def summarize(self, ce_cycle: ChaosCycle) -> Tuple[LLMLog, str]:
         logger = LoggingCallback(name="overall_summary", llm=self.llm)
-        empty = st.empty()
+        expander = self.message_logger.expander("##### Summary of your k8s yaml", expanded=True)
+        empty = expander.placeholder()
         for summary in self.agent.stream({"ce_cycle_overview": ce_cycle.to_str()}, {"callbacks": [logger]}):
             if (summary_str := summary.get("summary")) is not None:
                 empty.write(summary_str)

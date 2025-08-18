@@ -73,17 +73,17 @@ class ChaosEater:
         self.namespace = namespace
         # llm
         self.llm = llm
-        # message_logger
+        # message logger
         self.message_logger = message_logger
         # CE tool
         self.ce_tool = ce_tool
         # agent managers
         self.preprocessor  = PreProcessor(llm, self.message_logger)
         self.hypothesizer  = Hypothesizer(llm, ce_tool, self.message_logger)
-        self.experimenter  = Experimenter(llm, ce_tool, namespace=namespace)
-        self.analyzer      = Analyzer(llm, namespace)
-        self.improver      = Improver(llm, ce_tool)
-        self.postprocessor = PostProcessor(llm)
+        self.experimenter  = Experimenter(llm, ce_tool, message_logger=self.message_logger, namespace=namespace)
+        self.analyzer      = Analyzer(llm, self.message_logger, namespace)
+        self.improver      = Improver(llm, ce_tool, self.message_logger)
+        self.postprocessor = PostProcessor(llm, self.message_logger)
 
     def run_ce_cycle(
         self,

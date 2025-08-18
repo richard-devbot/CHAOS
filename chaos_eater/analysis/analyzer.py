@@ -7,7 +7,7 @@ from ..hypothesis.hypothesizer import Hypothesis
 from ..experiment.experimenter import ChaosExperiment, ChaosExperimentResult
 from ..utils.wrappers import BaseModel, LLM
 from ..utils.llms import LLMLog
-from ..utils.functions import save_json, recursive_to_dict
+from ..utils.functions import save_json, recursive_to_dict, MessageLogger
 
 
 class Analysis(BaseModel):
@@ -18,14 +18,17 @@ class Analyzer:
     def __init__(
         self,
         llm: LLM,
+        message_logger: MessageLogger,
         namespace: str = "chaos-eater"
     ) -> None:
         # llm
         self.llm = llm
+        # message logger
+        self.message_logger = message_logger
         # general
         self.namespace = namespace
         # analysis
-        self.analysis_agent = AnalysisAgent(llm)
+        self.analysis_agent = AnalysisAgent(llm, message_logger)
 
     def analyze(
         self,

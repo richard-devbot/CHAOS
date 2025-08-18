@@ -1,13 +1,11 @@
 from typing import Tuple
 
-import streamlit as st
-
 from ...preprocessing.preprocessor import ProcessedData
 from ...hypothesis.hypothesizer import Hypothesis
 from ...experiment.experimenter import ChaosExperiment, ChaosExperimentResult
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField
 from ...utils.llms import build_json_agent, LLMLog, LoggingCallback
-from ...utils.functions import dict_to_str
+from ...utils.functions import dict_to_str, MessageLogger
 
 
 SYS_ANALYZE_RESULT = """\
@@ -59,8 +57,13 @@ class AnalysisReport(LLMBaseModel):
 
 
 class AnalysisAgent:
-    def __init__(self, llm: LLM) -> None:
+    def __init__(
+        self,
+        llm: LLM,
+        message_logger: MessageLogger
+    ) -> None:
         self.llm = llm
+        self.message_logger = message_logger
 
     def analyze(
         self,
@@ -71,7 +74,7 @@ class AnalysisAgent:
         experiment_result: ChaosExperimentResult
     ) -> Tuple[LLMLog, str]: # NOTE: not Analysis, but str
         logger = LoggingCallback(name="analysis_experiment", llm=self.llm)
-        empty = st.empty()
+        empty = self.message_logger.placeholder()
         if len(reconfig_history) == 0:
             agent = build_json_agent(
                 llm=self.llm,

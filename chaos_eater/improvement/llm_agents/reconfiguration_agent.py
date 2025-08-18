@@ -2,8 +2,6 @@ import os
 import subprocess
 from typing import List, Tuple, Literal, Optional
 
-import streamlit as st
-
 from ...analysis.analyzer import Analysis
 from ...experiment.experimenter import ChaosExperiment, ChaosExperimentResult
 from ...hypothesis.hypothesizer import Hypothesis
@@ -20,7 +18,8 @@ from ...utils.functions import (
     delete_file,
     list_to_bullet_points,
     limit_string_length,
-    remove_curly_braces
+    remove_curly_braces,
+    MessageLogger
 )
 from ...utils.schemas import File
 from ...utils.k8s import remove_all_resources_by_labels
@@ -139,10 +138,16 @@ class ReconfigurationResult(BaseModel):
 
 
 class ReconfigurationAgent:
-    def __init__(self, llm: LLM) -> None:
+    def __init__(
+        self,
+        llm: LLM,
+        message_logger: MessageLogger
+    ) -> None:
         # llm
         self.llm = llm
-    
+        # message logger
+        self.message_logger = message_logger
+
     def reconfigure(
         self,
         input_data: ProcessedData,
@@ -337,35 +342,35 @@ class ReconfigurationAgent:
             pydantic_object=ModK8sYAMLs,
             is_async=False
         )
-        with st.expander("##### Reconfiguration", expanded=True):
-            thought_box = st.empty()
-            k8s_box = []
-            for mod_k8s_yamls in agent.stream({
-                "system_overview": input_data.to_k8s_overview_str(),
-                "hypothesis_overview": hypothesis.to_str(),
-                "experiment_plan_summary": experiment.plan["summary"],
-                "experiment_result": result_history0.to_str()},
-                {"callbacks": [logger]}
-            ):
-                if (thought := mod_k8s_yamls.get("thought")) is not None:
-                    thought_box.write(thought)
-                if (modified_k8s_yamls := mod_k8s_yamls.get("modified_k8s_yamls")) is not None:
-                    for i, mod_k8s_yaml in enumerate(modified_k8s_yamls):
-                        if i + 1 > len(k8s_box):
-                            k8s_box.append({
-                                "mod_type": st.empty(),
-                                "fname": st.empty(),
-                                "explanation": st.empty(),
-                                "code": st.empty(),
-                            })
-                        if (mod_type := mod_k8s_yaml.get("mod_type")) is not None:
-                            k8s_box[i]["mod_type"].write(f"Modification_type: {mod_type}")
-                        if (fname := mod_k8s_yaml.get("fname")) is not None:
-                            k8s_box[i]["fname"].write(f"File name: {fname}")
-                        if (explanation := mod_k8s_yaml.get("explanation")) is not None:
-                            k8s_box[i]["explanation"].write(explanation)
-                        if (code := mod_k8s_yaml.get("code")) is not None:
-                            k8s_box[i]["code"].code(code, language="yaml")
+        expander = self.message_logger.expander("##### Reconfiguration", expanded=True) 
+        thought_box = expander.placeholder()
+        k8s_box = []
+        for mod_k8s_yamls in agent.stream({
+            "system_overview": input_data.to_k8s_overview_str(),
+            "hypothesis_overview": hypothesis.to_str(),
+            "experiment_plan_summary": experiment.plan["summary"],
+            "experiment_result": result_history0.to_str()},
+            {"callbacks": [logger]}
+        ):
+            if (thought := mod_k8s_yamls.get("thought")) is not None:
+                thought_box.write(thought)
+            if (modified_k8s_yamls := mod_k8s_yamls.get("modified_k8s_yamls")) is not None:
+                for i, mod_k8s_yaml in enumerate(modified_k8s_yamls):
+                    if i + 1 > len(k8s_box):
+                        k8s_box.append({
+                            "mod_type": expander.placeholder(),
+                            "fname": expander.placeholder(),
+                            "explanation": expander.placeholder(),
+                            "code": expander.placeholder(),
+                        })
+                    if (mod_type := mod_k8s_yaml.get("mod_type")) is not None:
+                        k8s_box[i]["mod_type"].write(f"Modification_type: {mod_type}")
+                    if (fname := mod_k8s_yaml.get("fname")) is not None:
+                        k8s_box[i]["fname"].write(f"File name: {fname}")
+                    if (explanation := mod_k8s_yaml.get("explanation")) is not None:
+                        k8s_box[i]["explanation"].write(explanation)
+                    if (code := mod_k8s_yaml.get("code")) is not None:
+                        k8s_box[i]["code"].code(code, language="yaml")
         return mod_k8s_yamls
     
     def debug_reconfig_yamls(
@@ -413,33 +418,33 @@ class ReconfigurationAgent:
             pydantic_object=ModK8sYAMLs,
             is_async=False
         )
-        with st.expander("##### Reconfiguration", expanded=True):
-            thought_box = st.empty()
-            k8s_box = []
-            for mod_k8s_yamls in agent.stream({
-                "system_overview": input_data.to_k8s_overview_str(),
-                "hypothesis_overview": hypothesis.to_str(),
-                "experiment_plan_summary": experiment.plan["summary"],
-                "experiment_result": result_history0.to_str()},
-                {"callbacks": [logger]}
-            ):
-                if (thought := mod_k8s_yamls.get("thought")) is not None:
-                    thought_box.write(thought)
-                if (modified_k8s_yamls := mod_k8s_yamls.get("modified_k8s_yamls")) is not None:
-                    for i, mod_k8s_yaml in enumerate(modified_k8s_yamls):
-                        if i + 1 > len(k8s_box):
-                            k8s_box.append({
-                                "mod_type": st.empty(),
-                                "fname": st.empty(),
-                                "explanation": st.empty(),
-                                "code": st.empty(),
-                            })
-                        if (mod_type := mod_k8s_yaml.get("mod_type")) is not None:
-                            k8s_box[i]["mod_type"].write(f"Modification_type: {mod_type}")
-                        if (fname := mod_k8s_yaml.get("fname")) is not None:
-                            k8s_box[i]["fname"].write(f"File name: {fname}")
-                        if (explanation := mod_k8s_yaml.get("explanation")) is not None:
-                            k8s_box[i]["explanation"].write(explanation)
-                        if (code := mod_k8s_yaml.get("code")) is not None:
-                            k8s_box[i]["code"].code(code, language="yaml")
+        expander = self.message_logger.expander("##### Reconfiguration", expanded=True)
+        thought_box = expander.placeholder()
+        k8s_box = []
+        for mod_k8s_yamls in agent.stream({
+            "system_overview": input_data.to_k8s_overview_str(),
+            "hypothesis_overview": hypothesis.to_str(),
+            "experiment_plan_summary": experiment.plan["summary"],
+            "experiment_result": result_history0.to_str()},
+            {"callbacks": [logger]}
+        ):
+            if (thought := mod_k8s_yamls.get("thought")) is not None:
+                thought_box.write(thought)
+            if (modified_k8s_yamls := mod_k8s_yamls.get("modified_k8s_yamls")) is not None:
+                for i, mod_k8s_yaml in enumerate(modified_k8s_yamls):
+                    if i + 1 > len(k8s_box):
+                        k8s_box.append({
+                            "mod_type": expander.placeholder(),
+                            "fname": expander.placeholder(),
+                            "explanation": expander.placeholder(),
+                            "code": expander.placeholder(),
+                        })
+                    if (mod_type := mod_k8s_yaml.get("mod_type")) is not None:
+                        k8s_box[i]["mod_type"].write(f"Modification_type: {mod_type}")
+                    if (fname := mod_k8s_yaml.get("fname")) is not None:
+                        k8s_box[i]["fname"].write(f"File name: {fname}")
+                    if (explanation := mod_k8s_yaml.get("explanation")) is not None:
+                        k8s_box[i]["explanation"].write(explanation)
+                    if (code := mod_k8s_yaml.get("code")) is not None:
+                        k8s_box[i]["code"].code(code, language="yaml")
         return mod_k8s_yamls

@@ -2,8 +2,6 @@ import os
 import copy
 from typing import List, Tuple, Literal, Optional
 
-import streamlit as st
-
 from .experiment_plan_agent import ChaosExperimentPlan
 from ...ce_tools.ce_tool_base import CEToolBase
 from ...ce_tools.chaosmesh.faults.selectors import Selectors
@@ -19,7 +17,8 @@ from ...utils.functions import (
     copy_file,
     get_file_extension,
     sanitize_filename,
-    remove_curly_braces
+    remove_curly_braces,
+    MessageLogger
 )
 from ...utils.schemas import File
 from ...utils.constants import UNITTEST_BASE_PY_PATH
@@ -108,11 +107,13 @@ class ExperimentRePlanAgent:
         self,
         llm: LLM,
         ce_tool: CEToolBase,
+        message_logger: MessageLogger,
         test_dir: str = "sandbox/unit_test",
         namespace: str = "chaos-eater"
     ) -> None:
         self.llm = llm
         self.ce_tool = ce_tool
+        self.message_logger = message_logger
         self.test_dir = test_dir
         self.namespace = namespace
         self.scope_agent = build_json_agent(
@@ -146,7 +147,7 @@ class ExperimentRePlanAgent:
         #------------------------
         # replan the fault scope
         #------------------------
-        plan_msg = st.empty()
+        plan_msg = self.message_logger.placeholder()
         pseudo_streaming_text("##### Adjusting the scope of fault injection...", obj=plan_msg)
         self.replan_scope(
             experiment=prev_experiment,
@@ -185,11 +186,11 @@ class ExperimentRePlanAgent:
     ) -> None:
         fault_injections = experiment_plan["fault_injection"]["fault_injection"]
         for fault_injection in fault_injections:
-            st.write("Current fault injection settings:")
-            st.write(f"{self.get_fault_str(fault_injection)}")
-            thought_empty = st.empty()
-            st.write("Next fault injection scope:")
-            selector_empty = st.empty()
+            self.message_logger.write("Current fault injection settings:")
+            self.message_logger.write(f"{self.get_fault_str(fault_injection)}")
+            thought_empty = self.message_logger.placeholder()
+            self.message_logger.write("Next fault injection scope:")
+            selector_empty = self.message_logger.placeholder()
             for token in self.scope_agent.stream({
                 "prev_k8s_yamls": file_list_to_str(prev_k8s_yamls),
                 "experiment_plan": experiment.to_str(),
@@ -264,9 +265,9 @@ class ExperimentRePlanAgent:
                 #-----------------------------------------------------
                 # generate an adjusted unittest if needed (first try)
                 #-----------------------------------------------------
-                st.write("Adjusted unittest")
-                self.thought_empty = st.empty()
-                self.code_empty = st.empty()
+                self.message_logger.write("Adjusted unittest")
+                self.thought_empty = self.message_logger.placeholder()
+                self.code_empty = self.message_logger.placeholder()
                 for token in self.unittest_agent.stream({
                     "prev_k8s_yamls": file_list_to_str(prev_k8s_yamls),
                     "prev_unittest": unittest_code,
@@ -379,8 +380,8 @@ class ExperimentRePlanAgent:
         #----------------------------------
         # debugging the adjusted unit test
         #----------------------------------
-        st.write("Debugging:")
-        self.error_handling_empty = st.empty()
+        self.message_logger.write("Debugging:")
+        self.error_handling_empty = self.message_logger.placeholder()
         for token in debugging_agent.stream({
             "prev_k8s_yamls": file_list_to_str(prev_k8s_yamls),
             "prev_unittest": unittest_code,

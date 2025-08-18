@@ -1,18 +1,21 @@
 import os
 from typing import List, Tuple
 
-import streamlit as st
-
 from .llm_agents.summary_agent import SummaryAgent, ChaosCycle
 from ..utils.wrappers import LLM
 from ..utils.llms import LLMLog
-from ..utils.functions import save_json, recursive_to_dict
+from ..utils.functions import save_json, recursive_to_dict, MessageLogger
 
 
 class PostProcessor:
-    def __init__(self, llm: LLM) -> None:
+    def __init__(
+        self,
+        llm: LLM,
+        message_logger: MessageLogger
+    ) -> None:
         self.llm = llm
-        self.summary_agent = SummaryAgent(llm)
+        self.message_logger = message_logger
+        self.summary_agent = SummaryAgent(llm, message_logger)
 
     def process(
         self,
@@ -20,9 +23,7 @@ class PostProcessor:
         work_dir: str
     ) -> Tuple[List[LLMLog], str]:
         logs = []
-
-        with st.expander("##### Summary of your k8s yaml", expanded=True):
-            summary_log, summary = self.summary_agent.summarize(ce_cycle)
+        summary_log, summary = self.summary_agent.summarize(ce_cycle)
         logs.append(summary_log)
 
         os.makedirs(work_dir, exist_ok=True)

@@ -119,6 +119,15 @@ class StreamlitExpander:
         })
         return cont
 
+    def placeholder(self) -> StreamlitPlaceholder:
+        with self.expander:
+            placeholder = StreamlitPlaceholder()
+        self.children.append({
+            "type": "placeholder",
+            "content": placeholder
+        })
+        return placeholder
+
 class StreamlitLogger(MessageLogger):
     def write(self, text: str) -> None:
         self.messages.append({
@@ -168,16 +177,61 @@ class StreamlitLogger(MessageLogger):
         })
         return cont
     
+    def expander(self, text: str, expanded: bool = True) -> StreamlitExpander:
+        expander = StreamlitExpander(text, expanded)
+        self.messages.append({
+            "type": "expander",
+            "content": expander
+        })
+        return expander
+    
+    def iframe(
+        self,
+        url: str,
+        height: int,
+        scrolling: bool
+    ) -> None:
+        st.components.v1.iframe(url, height=height, scrolling=scrolling)
+        self.messages.append({
+            "type": "iframe",
+            "content": url,
+            "height": height,
+            "scrolling": scrolling
+        })
+
     def display_history(self) -> None:
-        for message in self.messages:
-            if message["type"] == "write":
+        self._render_messages(self.messages)
+
+    def _render_messages(self, messages, parent=None) -> None:
+        for message in messages:
+            t = message["type"]
+            if t == "write":
                 st.write(message["content"])
-            elif message["type"] == "code":
+            elif t == "code":
                 st.code(message["content"], message["language"])
-            elif message["type"] == "placeholder":
-                st.write(message["content"].content)
-            elif message["type"] == "subheader":
+            elif t == "subheader":
                 st.subheader(message["content"], divider=message["divider"])
+            elif t == "iframe":
+                st.components.v1.iframe(
+                    message["content"],
+                    height=message["height"],
+                    scrolling=message["scrolling"]
+                )
+            elif t == "container":
+                with st.container(border=message["border"]):
+                    self._render_messages(message["content"].children)
+            elif t == "expander":
+                with st.expander(message["content"].text, expanded=message["content"].expanded):
+                    self._render_messages(message["content"].children)
+            elif t == "placeholder":
+                ph = st.empty()
+                if hasattr(message["content"], "type") and message["content"].type == "write":
+                    ph.write(message["content"].content)
+                elif hasattr(message["content"], "type") and message["content"].type == "code":
+                    ph.code(message["content"].content, language=message["content"].language)
+                elif hasattr(message["content"], "type") and message["content"].type == "expander":
+                    with ph.expander(message["content"].content.text, expanded=message["content"].content.expanded):
+                        self._render_messages(message["content"].content.children)
 
 class StreamlitDisplayHandler:
     """Display handler implementation for Streamlit UI"""

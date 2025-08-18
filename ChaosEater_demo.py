@@ -422,11 +422,6 @@ def main():
                         st.session_state.input.ce_instructions = prompt
                         st.session_state.submit = True
                     st.rerun()
-                #--------------------
-                # TODO: chat history
-                #--------------------
-                # st.session_state.chat_history.append(HumanMessage(content=st.session_state.k8s_yaml))
-                # st.session_state.chat_history.append(HumanMessage(content=prompt))
                 input = st.session_state.input
                 if prompt:
                     input.ce_instructions = prompt
@@ -436,8 +431,8 @@ def main():
                 # user inputs
                 #-------------
                 with st.chat_message("user"):
-                    st.write("##### Your instructions for Chaos Engineering:")
-                    st.write(input.ce_instructions)
+                    st.session_state.message_logger.write("##### Your instructions for Chaos Engineering:")
+                    st.session_state.message_logger.write(input.ce_instructions)
                 #---------------------
                 # chaoseater response
                 #---------------------
@@ -469,7 +464,6 @@ def main():
                                 file_name=f"{os.path.basename(zip_path)}",
                                 mime=f"output/zip"
                             )
-                    # st.session_state.chat_history.append(AIMessage(content=response["response"]))
             else:
                 print(st.session_state.k8s_yamls)
                 st.chat_message("assistant", avatar=CHAOSEATER_ICON).write("Please input your k8s mainfests!")

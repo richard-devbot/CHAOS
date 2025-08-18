@@ -4,18 +4,23 @@ import json
 import time
 from typing import Dict, List, Tuple
 
-import streamlit as st
-
 from .llm_agents.experiment_plan_agent import ExperimentPlanAgent
 from .llm_agents.experiment_replan_agent import ExperimentRePlanAgent
 from .algorithms.plan2workflow_converter import Plan2WorkflowConverter
 from ..preprocessing.preprocessor import ProcessedData
 from ..hypothesis.hypothesizer import Hypothesis
 from ..ce_tools.ce_tool_base import CEToolBase
-from ..utils.functions import pseudo_streaming_text, type_cmd, save_json, recursive_to_dict, limit_string_length
 from ..utils.schemas import File
 from ..utils.wrappers import LLM, BaseModel
 from ..utils.llms import LLMLog
+from ..utils.functions import (
+    pseudo_streaming_text,
+    type_cmd,
+    save_json,
+    recursive_to_dict,
+    limit_string_length,
+    MessageLogger
+)
 
 
 CHAOS_EXPERIMENT_PLAN_TEMPALTE = """\
@@ -95,6 +100,7 @@ class Experimenter:
         self,
         llm: LLM,
         ce_tool: CEToolBase,
+        message_logger: MessageLogger,
         test_dir: str = "sandbox/unit_test",
         chaos_dir: str = "sandbox/",
         namespace: str = "chaos-eater",
@@ -103,6 +109,8 @@ class Experimenter:
         self.llm = llm
         # CE tool
         self.ce_tool = ce_tool
+        # message logger
+        self.message_logger = message_logger
         # params
         self.test_dir = test_dir
         self.chaos_dir = chaos_dir
@@ -110,8 +118,19 @@ class Experimenter:
         self.experiment_plan = None
         self.workflow = None
         # agents
-        self.experiment_plan_agent = ExperimentPlanAgent(llm, test_dir, namespace)
-        self.experiment_replan_agent = ExperimentRePlanAgent(llm, test_dir, namespace)
+        self.experiment_plan_agent = ExperimentPlanAgent(
+            llm=llm,
+            ce_tool=ce_tool,
+            message_logger=message_logger,
+            test_dir=test_dir,
+            namespace=namespace)
+        self.experiment_replan_agent = ExperimentRePlanAgent(
+            llm=llm,
+            ce_tool=ce_tool,
+            message_logger=message_logger,
+            test_dir=test_dir,
+            namespace=namespace
+        )
         # algortihms
         self.plan2workflow_converter = Plan2WorkflowConverter()
 
@@ -201,7 +220,7 @@ class Experimenter:
         #-----------------------------------
         # run the valid chaos workflow
         #-----------------------------------
-        execution_msg = st.empty()
+        execution_msg = self.message_logger.placeholder()
         pseudo_streaming_text("##### Running the experiment... See http://localhost:2333 for more details.", obj=execution_msg)
         # self.ce_tool.run_experiment() # TODO
         # reset the experiment
@@ -210,7 +229,7 @@ class Experimenter:
         type_cmd(f'kubectl delete po --context {kube_context} -n {namespace} --selector="chaos-mesh.org/workflow={experiment.workflow_name}" --ignore-not-found')
         # run the experiment
         type_cmd(f"kubectl apply --context {kube_context} -n {namespace} -f {experiment.workflow.path}")
-        st.components.v1.iframe("http://localhost:2333/#/workflows", height=500, scrolling=True)
+        self.message_logger.iframe("http://localhost:2333/#/workflows", height=500, scrolling=True)
 
         #--------------------------
         # wait for workflow to end
