@@ -52,7 +52,10 @@ class SteadyStateDraftAgent:
         self.llm = llm
         self.agent = build_json_agent(
             llm=llm,
-            chat_messages=[("system", SYS_DRAFT_STEADY_STATE), ("human", USER_DRAFT_STEADY_STATE)],
+            chat_messages=[
+                ("system", SYS_DRAFT_STEADY_STATE),
+                ("human", USER_DRAFT_STEADY_STATE)
+            ],
             pydantic_object=SteadyStateDraft,
             is_async=False
         )

@@ -79,7 +79,7 @@ class ChaosEater:
         self.ce_tool = ce_tool
         # agent managers
         self.preprocessor  = PreProcessor(llm, self.message_logger)
-        self.hypothesizer  = Hypothesizer(llm, ce_tool)
+        self.hypothesizer  = Hypothesizer(llm, ce_tool, self.message_logger)
         self.experimenter  = Experimenter(llm, ce_tool, namespace=namespace)
         self.analyzer      = Analyzer(llm, namespace)
         self.improver      = Improver(llm, ce_tool)
@@ -97,19 +97,19 @@ class ChaosEater:
         max_num_steadystates: int = 2,
         max_retries: int = 3
     ) -> ChaosEaterOutput:
-        st.subheader("Phase 0: Preprocessing", divider="gray")
+        self.message_logger.subheader("Phase 0: Preprocessing", divider="gray")
         # clean the cluster
         spinner = Spinner(f"##### Cleaning the cluster ```{kube_context}```...")
         remove_all_resources_by_namespace(
             kube_context,
             self.namespace,
-            display_handler=StreamlitDisplayHandler()
+            display_handler=StreamlitDisplayHandler(self.message_logger)
         )
         if clean_cluster_before_run:
             remove_all_resources_by_labels(
                 kube_context,
                 f"project={project_name}",
-                display_handler=StreamlitDisplayHandler()
+                display_handler=StreamlitDisplayHandler(self.message_logger)
             )
         spinner.end(f"##### Cleaning the cluster ```{kube_context}```... Done")
         # prepare a working directory
@@ -142,7 +142,7 @@ class ChaosEater:
         #---------------
         # 1. hypothesis
         #---------------
-        st.subheader("Phase 1: Hypothesis", divider="gray")
+        self.message_logger.subheader("Phase 1: Hypothesis", divider="gray")
         start_time = time.time()
         hypothesis_logs, hypothesis = self.hypothesizer.hypothesize(
             data=data,
@@ -160,7 +160,7 @@ class ChaosEater:
         #---------------------
         # 2. Chaos Experiment
         #---------------------
-        st.subheader("Phase 2: Chaos Experiment", divider="gray")
+        self.message_logger.subheader("Phase 2: Chaos Experiment", divider="gray")
         # 2.1. plan a chaos experiment
         start_time = time.time()
         experiment_logs, experiment = self.experimenter.plan_experiment(
@@ -197,7 +197,7 @@ class ChaosEater:
 
             # 
             if experiment_result.all_tests_passed:
-                st.write("##### Your k8s yaml already has good resilience!!!")
+                self.message_logger.write("##### Your k8s yaml already has good resilience!!!")
                 break
             
             # set flag
@@ -210,7 +210,7 @@ class ChaosEater:
             #-------------
             # 3. analysis
             #-------------
-            st.subheader("Phase 3: Analysis", divider="gray")
+            self.message_logger.subheader("Phase 3: Analysis", divider="gray")
             start_time = time.time()
             analysis_logs, analysis = self.analyzer.analyze(
                 mod_count=mod_k8s_count,
@@ -230,7 +230,7 @@ class ChaosEater:
             #----------------
             # 4. improvement
             #----------------
-            st.subheader("Phase 4: Improvement", divider="gray")
+            self.message_logger.subheader("Phase 4: Improvement", divider="gray")
             start_time = time.time()
             reconfig_logs, reconfig = self.improver.reconfigure(
                 input_data=data,
@@ -339,15 +339,15 @@ class ChaosEater:
                 run_command(
                     cmd=f"skaffold run --kube-context {kube_context} -l project={project_name}",
                     cwd=os.path.dirname(new_skaffold_path),
-                    display_handler=StreamlitDisplayHandler()
+                    display_handler=StreamlitDisplayHandler(self.message_logger)
                 )
             except subprocess.CalledProcessError as e:
                 raise RuntimeError("K8s resource deployment failed.")
             spinner.end(f"##### Deploying reconfigured resources... Done")
-            st.write("##### Resource statuses")
+            self.message_logger.write("##### Resource statuses")
             run_command(
                 cmd=f"kubectl get all --all-namespaces --context {kube_context} --selector=project={project_name}",
-                display_handler=StreamlitDisplayHandler()
+                display_handler=StreamlitDisplayHandler(self.message_logger)
             )
 
             #------------------------------------------------------
@@ -371,7 +371,7 @@ class ChaosEater:
         #------------------------------
         # 5. post-processing (summary)
         #------------------------------
-        st.subheader("Phase EX: Postprocessing", divider="gray")
+        self.message_logger.subheader("Phase EX: Postprocessing", divider="gray")
         ce_output.ce_cycle.completes_reconfig = True
         save_json(f"{output_dir}/output.json", ce_output.dict())
         # summary
@@ -393,6 +393,6 @@ class ChaosEater:
             remove_all_resources_by_labels(
                 kube_context,
                 f"project={project_name}",
-                display_handler=StreamlitDisplayHandler()
+                display_handler=StreamlitDisplayHandler(self.message_logger)
             )
         return ce_output

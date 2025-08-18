@@ -26,15 +26,98 @@ class Spinner:
 class StreamlitPlaceholder:
     def __init__(self):
         self.placeholder = st.empty()
+        self.type = ""
         self.content = ""
 
     def write(self, text: str) -> None:
         self.placeholder.write(text)
+        self.type = "write"
         self.content = text
 
-    def code(self, text: str) -> None:
+    def code(self, text: str, language: str = None) -> None:
         self.placeholder.code(text)
+        self.type = "code"
         self.content = text
+        self.language = language
+
+    def expander(self, text: str, expanded: bool = True):
+        self.type = "expander"
+        self.content = StreamlitExpander(text, expanded, self.placeholder)
+        return self.content
+
+class StreamlitContainer:
+    def __init__(self, border: bool = False) -> None:
+        self.container = st.container(border=border)
+        self.type = "container"
+        self.border = border
+        self.children = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    def write(self, text: str) -> None:
+        self.children.append({"type": "write", "content": text})
+        self.container.write(text)
+
+    def code(self, code: str, language: str = None) -> None:
+        self.children.append({"type": "code", "content": code, "language": language})
+        self.container.code(code, language=language)
+
+    def placeholder(self) -> StreamlitPlaceholder:
+        with self.container:
+            placeholder = StreamlitPlaceholder()
+        self.children.append({
+            "type": "placeholder",
+            "content": placeholder
+        })
+        return placeholder
+
+    # def expander(self, text: str, expanded: bool = True):
+    #     exp = self.container.expander(text, expanded=expanded)
+    #     self.children.append({"type": "expander", "title": text, "expanded": expanded})
+    #     return exp
+
+class StreamlitExpander:
+    def __init__(
+        self,
+        text: str,
+        expanded: bool = True,
+        parent_placeholder: StreamlitPlaceholder = None
+    ):
+        if parent_placeholder is None:
+            self.expander = st.expander(text, expanded=expanded)
+        else:
+            self.expander = parent_placeholder.expander(text, expanded=expanded)
+        self.text = text
+        self.expanded = expanded
+        self.children = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    def write(self, text: str) -> None:
+        self.children.append({"type": "write", "content": text})
+        self.expander.write(text)
+
+    def code(self, code: str, language: str = None) -> None:
+        self.children.append({"type": "code", "content": code, "language": language})
+        self.expander.code(code, language=language)
+
+    def container(self, border: bool = False) -> StreamlitContainer:
+        with self.expander:
+            cont = StreamlitContainer(border=border)
+        self.children.append({
+            "type": "container",
+            "border": border,
+            "content": cont
+        })
+        return cont
 
 class StreamlitLogger(MessageLogger):
     def write(self, text: str) -> None:
@@ -64,6 +147,27 @@ class StreamlitLogger(MessageLogger):
         })
         return placeholder
     
+    def subheader(
+        self,
+        text: str,
+        divider: str
+    ) -> None:
+        self.messages.append({
+            "type": "subheader",
+            "content": text,
+            "divider": divider
+        })
+        st.subheader(text, divider=divider)
+
+    def container(self, border: bool = False) -> StreamlitContainer:
+        cont = StreamlitContainer(border=border)
+        self.messages.append({
+            "type": "container",
+            "border": border,
+            "content": cont
+        })
+        return cont
+    
     def display_history(self) -> None:
         for message in self.messages:
             if message["type"] == "write":
@@ -72,15 +176,21 @@ class StreamlitLogger(MessageLogger):
                 st.code(message["content"], message["language"])
             elif message["type"] == "placeholder":
                 st.write(message["content"].content)
-
+            elif message["type"] == "subheader":
+                st.subheader(message["content"], divider=message["divider"])
 
 class StreamlitDisplayHandler:
     """Display handler implementation for Streamlit UI"""
     
-    def __init__(self, header: str = ""):
+    def __init__(
+        self,
+        message_logger: StreamlitLogger,
+        header: str = ""
+    ):
+        self.message_logger = message_logger
         # Create empty containers for dynamic content updates
-        st.write(header)
-        self.cmd_container = st.empty()
+        self.message_logger.write(header)
+        self.cmd_container = self.message_logger.placeholder()
         self.idx = -1
         self.cmd = []
         self.output_text = []
@@ -129,13 +239,15 @@ class StreamlitDisplayHandler:
         self.cmd_container.code(output_text, language="powershell")
 
 
-class StreamlitContainer:
+class StreamlitDisplayContainer:
     def __init__(
         self,
+        message_logger: StreamlitLogger,
         text: str = "##### ",
         expanded: bool = True
     ) -> None:
-        self.header_empty = st.empty()
+        self.message_logger = message_logger
+        self.header_empty = self.message_logger.placeholder()
         self.header = self.header_empty.expander(text, expanded=expanded)
         self.subcontainers = []
         self.subsubcontainers = []
@@ -156,12 +268,10 @@ class StreamlitContainer:
         border: bool = True,
         header: str = ""
     ):
-        with self.header:
-            subcontainer = st.container(border=border)
-            self.subcontainers.append({"id": id, "item": subcontainer})
-            if header != "":
-                with subcontainer:
-                    st.write(header)
+        subcontainer = self.header.container(border=border)
+        self.subcontainers.append({"id": id, "item": subcontainer})
+        if header != "":
+            subcontainer.write(header)
 
     def create_subsubcontainer(
         self,
@@ -171,15 +281,15 @@ class StreamlitContainer:
         is_code: bool = False,
         language: str = "python"
     ) -> None:
-        with self.get_item_from_id(self.subcontainers, subcontainer_id):
-            try:
-                self.get_item_from_id(self.subsubcontainers, subsubcontainer_id)
-                raise RuntimeError(f"The subsub container with id '{subsubcontainer_id}' already exists. No duplicated ids are allowed.")
-            except RuntimeError:
-                empty = st.empty()
-                self.subsubcontainers.append({"id": subsubcontainer_id, "item": empty})
-                if text is not None:
-                    self.update_subsubcontainer(text, subsubcontainer_id, is_code, language)
+        subcontainer = self.get_item_from_id(self.subcontainers, subcontainer_id)
+        try:
+            self.get_item_from_id(self.subsubcontainers, subsubcontainer_id)
+            raise RuntimeError(f"The subsub container with id '{subsubcontainer_id}' already exists. No duplicated ids are allowed.")
+        except RuntimeError:
+            placeholder = subcontainer.placeholder()
+            self.subsubcontainers.append({"id": subsubcontainer_id, "item": placeholder})
+            if text is not None:
+                self.update_subsubcontainer(text, subsubcontainer_id, is_code, language)
 
     def update_subsubcontainer(
         self,

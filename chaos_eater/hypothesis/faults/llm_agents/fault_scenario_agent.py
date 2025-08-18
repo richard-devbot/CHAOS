@@ -1,12 +1,10 @@
 from typing import List, Dict, Tuple, Literal
 
-import streamlit as st
-
 from ...steady_states.steady_state_definer import SteadyStates
 from ....ce_tools.ce_tool_base import CEToolBase
 from ....utils.wrappers import LLM, LLMBaseModel, LLMField
 from ....utils.llms import build_json_agent, LLMLog, LoggingCallback
-from ....utils.streamlit import StreamlitContainer
+from ....utils.streamlit import StreamlitDisplayContainer
 
 
 SYS_ASSUME_FAULT_SCENARIOS = """\
@@ -60,17 +58,16 @@ class FaultScenarioAgent:
         self,
         user_input: str,
         ce_instructions: str,
-        steady_states: SteadyStates
+        steady_states: SteadyStates,
+        display_container: StreamlitDisplayContainer
     ) -> Tuple[LLMLog, Dict[str, str]]:
         logger = LoggingCallback(name="fault_scenario_assumption", llm=self.llm)
-        container = StreamlitContainer()
         description_id = "fault_description"
         injection_id = "fault_injections"
-        container.create_subcontainer(id=description_id, header=f"##### 💬 Description")
-        container.create_subsubcontainer(subcontainer_id=description_id, subsubcontainer_id=description_id)
-        container.create_subcontainer(id=injection_id, header=f"##### 🐞 Fault-injection sequence")
-        container.create_subsubcontainer(subcontainer_id=injection_id, subsubcontainer_id=injection_id)
-        st.session_state.fault_container = container
+        display_container.create_subcontainer(id=description_id, header=f"##### 💬 Description")
+        display_container.create_subsubcontainer(subcontainer_id=description_id, subsubcontainer_id=description_id)
+        display_container.create_subcontainer(id=injection_id, header=f"##### 🐞 Fault-injection sequence")
+        display_container.create_subsubcontainer(subcontainer_id=injection_id, subsubcontainer_id=injection_id)
         for token in self.agent.stream({
             "user_input": user_input,
             "ce_instructions": ce_instructions,
@@ -80,11 +77,11 @@ class FaultScenarioAgent:
             {"callbacks": [logger]}
         ):
             if (event := token.get("event")) is not None:
-                st.session_state.fault_container.update_header(f"##### ⬜ Scenario: {event}", expanded=True)
+                display_container.update_header(f"##### ⬜ Scenario: {event}", expanded=True)
             if (description := token.get("thought")) is not None:
-                st.session_state.fault_container.update_subsubcontainer(description, description_id)
+                display_container.update_subsubcontainer(description, description_id)
             if (faults := token.get("faults"))is not None:
-                st.session_state.fault_container.update_subsubcontainer(self.convert_fault_list_to_str(faults), injection_id)
+                display_container.update_subsubcontainer(self.convert_fault_list_to_str(faults), injection_id)
         return logger.log, token
     
     def convert_fault_list_to_str(self, faults: List[List[Fault]]) -> str:

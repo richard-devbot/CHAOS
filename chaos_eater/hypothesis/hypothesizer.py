@@ -4,7 +4,7 @@ from typing import List, Tuple
 from .steady_states.steady_state_definer import SteadyStateDefiner, SteadyStates
 from .faults.fault_definer import FaultDefiner, FaultScenario
 from ..utils.wrappers import LLM, BaseModel
-from ..utils.functions import save_json, recursive_to_dict
+from ..utils.functions import save_json, recursive_to_dict, MessageLogger
 from ..utils.llms import LLMLog
 from ..ce_tools.ce_tool_base import CEToolBase
 from ..preprocessing.preprocessor import ProcessedData
@@ -35,19 +35,33 @@ class Hypothesizer:
         self,
         llm: LLM,
         ce_tool: CEToolBase,
+        message_logger: MessageLogger,
         test_dir: str = "sandbox/unit_test",
         namespace: str = "chaos-eater",
         max_mod_loop: int = 3
     ) -> None:
         self.llm = llm
         self.ce_tool = ce_tool
+        self.message_logger = message_logger
         # params
         self.test_dir = test_dir
         self.namespace = namespace
         self.max_mod_loop = max_mod_loop
         # agents
-        self.steady_state_definer = SteadyStateDefiner(llm, test_dir, namespace, max_mod_loop)
-        self.fault_definer = FaultDefiner(llm, ce_tool, test_dir, namespace)
+        self.steady_state_definer = SteadyStateDefiner(
+            llm=llm,
+            message_logger=message_logger,
+            test_dir=test_dir,
+            namespace=namespace,
+            max_mod_loop=max_mod_loop
+        )
+        self.fault_definer = FaultDefiner(
+            llm=llm,
+            ce_tool=ce_tool,
+            message_logger=message_logger,
+            test_dir=test_dir,
+            namespace=namespace
+        )
 
     def hypothesize(
         self,

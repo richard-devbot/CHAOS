@@ -1,8 +1,6 @@
 import os
 from typing import List, Dict, Tuple
 
-import streamlit as st
-
 from .llm_agents.draft_agent import SteadyStateDraftAgent
 from .llm_agents.inspection_agent import InspectionAgent
 from .llm_agents.threshold_agent import ThresholdAgent
@@ -13,8 +11,8 @@ from ...preprocessing.preprocessor import ProcessedData
 from ...utils.wrappers  import LLM, BaseModel
 from ...utils.schemas import File
 from ...utils.llms import LLMLog
-from ...utils.functions import int_to_ordinal
-from ...utils.streamlit import StreamlitContainer
+from ...utils.functions import int_to_ordinal, MessageLogger
+from ...utils.streamlit import StreamlitDisplayContainer
 
 
 STEADY_STATE_OVERVIEW_TEMPLATE = """\
@@ -80,11 +78,13 @@ class SteadyStateDefiner:
     def __init__(
         self,
         llm: LLM,
+        message_logger: MessageLogger,
         test_dir: str = "sandbox/unit_test",
         namespace: str = "chaos-eater",
         max_mod_loop: int = 5
     ) -> None:
         self.llm = llm
+        self.message_logger = message_logger
         self.test_dir = test_dir
         self.namespace = namespace
         self.max_mod_loop = max_mod_loop
@@ -107,7 +107,7 @@ class SteadyStateDefiner:
         # 0. initialization
         #-------------------
         # gui settings
-        st.write("##### Steady-state definition")
+        self.message_logger.write("##### Steady-state definition")
         # directory settings
         steady_state_dir = f"{work_dir}/steady_states"
         os.makedirs(steady_state_dir, exist_ok=True)
@@ -127,7 +127,7 @@ class SteadyStateDefiner:
             num_retries += 1
 
             # display settings
-            display_container = StreamlitContainer()
+            display_container = StreamlitDisplayContainer(self.message_logger)
             steady_state_containers.append(display_container)
 
             #-------------------------
@@ -199,8 +199,8 @@ class SteadyStateDefiner:
             # Check steady-state completion
             #-------------------------------
             if steady_states.count >= max_num_steady_states:
-                with st.container(border=True):
-                    st.write(f"##### The number of steady states has reached the maximum limit ({max_num_steady_states}).")
+                container = self.message_logger.container(border=True)
+                container.write(f"##### The number of steady states has reached the maximum limit ({max_num_steady_states}).")
                 break
             check_log, check = self.completion_check_agent.check_steady_state_completion(
                 input_data=input_data,

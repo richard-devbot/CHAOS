@@ -140,7 +140,7 @@ class PreProcessor:
                 run_command(
                     cmd=f"skaffold run --kube-context {kube_context} -l project={project_name}",
                     cwd=os.path.dirname(new_skaffold_yaml.path),
-                    display_handler=StreamlitDisplayHandler()
+                    display_handler=StreamlitDisplayHandler(self.message_logger)
                 )
             except subprocess.CalledProcessError as e:
                 raise RuntimeError("K8s resource deployment failed.")
@@ -152,7 +152,7 @@ class PreProcessor:
         self.message_logger.write("##### Resource statuses")
         run_command(
             cmd=f"kubectl get all --all-namespaces --context {kube_context} --selector=project={project_name}",
-            display_handler=StreamlitDisplayHandler()
+            display_handler=StreamlitDisplayHandler(self.message_logger)
         )
 
         #-----------------------------

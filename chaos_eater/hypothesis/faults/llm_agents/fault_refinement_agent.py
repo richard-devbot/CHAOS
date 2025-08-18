@@ -2,14 +2,17 @@ import yaml
 import json
 from typing import List, Dict, Any, Tuple, Iterable
 
-import streamlit as st
-
 from ...steady_states.steady_state_definer import SteadyStates
 from ....ce_tools.ce_tool_base import CEToolBase
 from ....utils.wrappers import LLM, BaseModel
 from ....utils.llms import build_json_agent, LLMLog, LoggingCallback
-from ....utils.functions import render_jinja_template, write_file, type_cmd3, limit_string_length
-
+from ....utils.streamlit import StreamlitDisplayContainer
+from ....utils.functions import (
+    render_jinja_template,
+    write_file,
+    type_cmd3,
+    limit_string_length,
+)
 
 SYS_REFINE_FAULT = """\
 You are a helpful AI assistant for Chaos Engineering.
@@ -93,11 +96,12 @@ class FaultRefiner:
         ce_instructions: str,
         steady_states: SteadyStates,
         fault_scenario: Dict[str, str],
+        display_container: StreamlitDisplayContainer,
         work_dir: str,
         max_retries: int = 3
     ) -> Tuple[LLMLog, FaultScenario]:
         self.logger = LoggingCallback(name="refine_fault_params", llm=self.llm)
-        st.session_state.fault_container.create_subcontainer(id="fault_params", header="##### ⚙ Detailed fault parameters")
+        display_container.create_subcontainer(id="fault_params", header="##### ⚙ Detailed fault parameters")
         faults_ = []
         idx = 0
         for para_faults in fault_scenario["faults"]:
@@ -114,6 +118,7 @@ class FaultRefiner:
                     steady_states=steady_states.to_overview_str(),
                     fault_scenario=self.convert_fault_senario_to_str(fault_scenario),
                     fault=fault,
+                    display_container=display_container
                 )
                 #-----------------------
                 # validate fault params
@@ -136,6 +141,7 @@ class FaultRefiner:
                         steady_states=steady_states.to_overview_str(),
                         fault_scenario=self.convert_fault_senario_to_str(fault_scenario),
                         fault=fault,
+                        display_container=display_container,
                         mod_count=mod_count,
                         output_history=output_history,
                         error_history=error_history
@@ -150,7 +156,7 @@ class FaultRefiner:
                     params=refined_prams
                 ))
                 idx += 1
-        st.session_state.fault_container.update_header(f"##### ✅ Scenario: {fault_scenario['event']}", expanded=True)
+        display_container.update_header(f"##### ✅ Scenario: {fault_scenario['event']}", expanded=True)
         return (
             self.logger.log, 
             FaultScenario(
@@ -168,6 +174,7 @@ class FaultRefiner:
         steady_states: str,
         fault_scenario: str,
         fault: Dict[str, str],
+        display_container: StreamlitDisplayContainer,
         mod_count: int = -1,
         output_history: List[dict] = [],
         error_history: List[str] = []
@@ -186,8 +193,8 @@ class FaultRefiner:
             is_async=False
         )
         if mod_count == -1:
-            st.session_state.fault_container.create_subsubcontainer(subcontainer_id="fault_params", subsubcontainer_id=f"fault_type{idx}")
-            st.session_state.fault_container.create_subsubcontainer(subcontainer_id="fault_params", subsubcontainer_id=f"fault_params{idx}")
+            display_container.create_subsubcontainer(subcontainer_id="fault_params", subsubcontainer_id=f"fault_type{idx}")
+            display_container.create_subsubcontainer(subcontainer_id="fault_params", subsubcontainer_id=f"fault_params{idx}")
         result = {}
         for token in agent.stream({
             "user_input": user_input,
@@ -202,8 +209,8 @@ class FaultRefiner:
                 key_item = token.get(key)
                 if key_item is not None and isinstance(key_item, Iterable) and len(key_item) > 0:
                     result[key] = key_item
-                    st.session_state.fault_container.update_subsubcontainer(f"Detailed parameters of ```{fault['name']}``` ({fault['scope']})", f"fault_type{idx}")
-                    st.session_state.fault_container.update_subsubcontainer(result, f"fault_params{idx}")
+                    display_container.update_subsubcontainer(f"Detailed parameters of ```{fault['name']}``` ({fault['scope']})", f"fault_type{idx}")
+                    display_container.update_subsubcontainer(result, f"fault_params{idx}")
         return result
     
     def convert_fault_senario_to_str(self, fault_scenario: Dict[str, str]) -> str:
