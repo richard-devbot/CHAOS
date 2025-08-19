@@ -35,7 +35,7 @@ class StreamlitPlaceholder:
         self.content = text
 
     def code(self, text: str, language: str = None) -> None:
-        self.placeholder.code(text)
+        self.placeholder.code(text, language=language)
         self.type = "code"
         self.content = text
         self.language = language
@@ -224,13 +224,12 @@ class StreamlitLogger(MessageLogger):
                 with st.expander(message["content"].text, expanded=message["content"].expanded):
                     self._render_messages(message["content"].children)
             elif t == "placeholder":
-                ph = st.empty()
                 if hasattr(message["content"], "type") and message["content"].type == "write":
-                    ph.write(message["content"].content)
+                    st.write(message["content"].content)
                 elif hasattr(message["content"], "type") and message["content"].type == "code":
-                    ph.code(message["content"].content, language=message["content"].language)
+                    st.code(message["content"].content, language=message["content"].language)
                 elif hasattr(message["content"], "type") and message["content"].type == "expander":
-                    with ph.expander(message["content"].content.text, expanded=message["content"].content.expanded):
+                    with st.expander(message["content"].content.text, expanded=message["content"].content.expanded):
                         self._render_messages(message["content"].content.children)
 
 class StreamlitDisplayHandler:
@@ -311,7 +310,9 @@ class StreamlitDisplayContainer:
         text: str,
         expanded: bool = True
     ) -> None:
-        self.header_empty.expander(text, expanded=expanded)
+        old = self.header
+        new = self.header_empty.expander(text, expanded=expanded)
+        new.children = old.children
 
     def complete_header(self):
         pass
