@@ -143,7 +143,7 @@ def main():
         #----------
         # settings
         #----------
-        with st.container(border=True):
+        with st.expander("General settings", expanded=True):
             #-----------------
             # model selection
             #-----------------
@@ -158,23 +158,16 @@ def main():
                 )
             )
             if selected_model == "custom":
-                model_name = st.text_input("Enter custom model name")
+                model_name = st.text_input("Enter custom model name", placeholder="ollama/gpt-oss:120b")
                 if model_name is None:
                     model_name = "openai/gpt-4o-2024-08-06"
             else:
                 model_name = selected_model
-            if model_name.startswith("openai"):
+            if model_name.startswith(("openai", "google", "anthropic")):
                 st.text_input(
                     label="API keys",
                     key="openai_key",
-                    placeholder="OpenAI API key",
-                    type="password"
-                )
-            else:
-                st.text_input(
-                    label="Token",
-                    key="hf_token",
-                    placeholder="Hugging Face token",
+                    placeholder="Your API key",
                     type="password"
                 )
             
@@ -204,7 +197,7 @@ def main():
             clean_cluster_before_run = st.checkbox("Clean the cluster before run", value=True)
             clean_cluster_after_run = st.checkbox("Clean the cluster after run", value=True)
             is_new_deployment = st.checkbox("New deployment", value=True)
-            seed = st.number_input("Seed for LLMs (GPTs only)", 42)
+            seed = st.number_input("Seed for LLMs", 42)
             temperature = st.number_input("Temperature for LLMs", 0.0)
             max_num_steadystates = st.number_input("Max. number of steady states", 3)
             max_retries = st.number_input("Max retries", 3)
@@ -213,8 +206,8 @@ def main():
         #---------------------------
         # usage: tokens and billing
         #---------------------------
-        with st.container(border=True):
-            st.write("Token usage:")
+        with st.expander("Usage", expanded=True):
+            # st.write("Token usage:")
             st.session_state.usage = st.empty()
             st.session_state.usage.write(f"Total billing: $0  \nTotal tokens: 0  \nInput tokens: 0  \nOuput tokens: 0")
         #-----------------
