@@ -128,6 +128,8 @@ def main():
         st.session_state.temperature = 0.0
     if "message_logger" not in st.session_state:
         st.session_state.message_logger = StreamlitLogger()
+    if "selected_cycle" not in st.session_state:
+        st.session_state.selected_cycle = ""
 
     #--------------
     # CSS settings
@@ -173,7 +175,7 @@ def main():
                 model_name = selected_model
             if model_name.startswith(("openai", "google", "anthropic")):
                 st.text_input(
-                    label="API keys",
+                    label="API key",
                     key="openai_key",
                     placeholder="Your API key",
                     type="password"
@@ -224,10 +226,13 @@ def main():
                 if st.button(
                     name,
                     key=name,
-                    use_container_width=True
+                    use_container_width=True,
+                    type="primary" if st.session_state.selected_cycle == name else "secondary"
                 ):
                     st.session_state.message_logger = StreamlitLogger.load(path)
+                    st.session_state.selected_cycle = name
                     st.session_state.is_first_run = False
+                    st.rerun()
 
         #---------------------------
         # usage: tokens and billing
