@@ -91,6 +91,15 @@ def init_choaseater(
     st.session_state.temperature = temperature
     st.session_state.seed = seed
 
+def find_message_logs(root: str = "."):
+    logs = {}
+    for entry in os.listdir(root):
+        cycle_path = os.path.join(root, entry)
+        if os.path.isdir(cycle_path):
+            target = os.path.join(cycle_path, "outputs", "message_log.pkl")
+            if os.path.exists(target):
+                logs[entry] = target
+    return logs
 
 def main():
     #---------------------------
@@ -201,6 +210,24 @@ def main():
             max_num_steadystates = st.number_input("Max. number of steady states", 3)
             max_retries = st.number_input("Max retries", 3)
 
+        #-------------------
+        # history of cycles
+        #-------------------
+        with st.expander("Cycles", expanded=True):
+            logs = find_message_logs(WORK_DIR)
+            sorted_logs = sorted(
+                logs.items(),
+                key=lambda x: os.path.getmtime(x[1]),
+                reverse=True
+            )
+            for name, path in sorted_logs:
+                if st.button(
+                    name,
+                    key=name,
+                    use_container_width=True
+                ):
+                    st.session_state.message_logger = StreamlitLogger.load(path)
+                    st.session_state.is_first_run = False
 
         #---------------------------
         # usage: tokens and billing
@@ -209,11 +236,13 @@ def main():
             # st.write("Token usage:")
             st.session_state.usage = st.empty()
             st.session_state.usage.write(f"Total billing: $0  \nTotal tokens: 0  \nInput tokens: 0  \nOuput tokens: 0")
+        
         #-----------------
         # command history
         #-----------------
         if not st.session_state.is_first_run:
             st.write("Command history")
+
 
     #------------------------
     # initialize chaos eater

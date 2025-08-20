@@ -389,6 +389,7 @@ class ChaosEater:
         ce_output.run_time["cycle"] = time.time() - entire_start_time
         ce_output.output_dir = mod_dir
         save_json(f"{output_dir}/output.json", ce_output.dict())
+        self.message_logger.save(f"{output_dir}/message_log.pkl")
         if clean_cluster_after_run:
             remove_all_resources_by_labels(
                 kube_context,
