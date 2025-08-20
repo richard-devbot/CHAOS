@@ -8,7 +8,6 @@ import streamlit as st
 import redis
 from streamlit.runtime.scriptrunner.script_run_context import get_script_run_ctx
 from streamlit_extras.bottom_container import bottom
-from langchain.schema import HumanMessage
 
 from chaos_eater.chaos_eater import ChaosEater, ChaosEaterInput
 from chaos_eater.ce_tools.ce_tool import CEToolType, CETool
@@ -325,21 +324,33 @@ def main():
             #----------
             col1, col2, col3 = st.columns(3)
             with col1:
-                if st.button("example#1:  \nNginx w/ detailed CE instructions", key="example1", use_container_width=True):
+                if st.button(
+                    "example#1:  \nNginx w/ detailed CE instructions",
+                    key="example1",
+                    use_container_width=True
+                ):
                     submit_example(
                         number=1,
                         example_dir=f"{EXAMPLE_DIR}/nginx",
                         instructions="- The Chaos-Engineering experiment must be completed within 1 minute.\n- List ONLY one steady state about Pod Count.\n- Conduct pod-kill"
                     )
             with col2:
-                if st.button("example#2:  \nNginx w/ limited experiment duration", key="example2", use_container_width=True):
+                if st.button(
+                    "example#2:  \nNginx w/ limited experiment duration",
+                    key="example2",
+                    use_container_width=True
+                ):
                     submit_example(
                         number=2,
                         example_dir=f"{EXAMPLE_DIR}/nginx",
                         instructions="The Chaos-Engineering experiment must be completed within 1 minute."
                     )
             with col3:
-                if st.button("example#3:  \nSock shop w/ limited experiment duration", key="example3", use_container_width=True):
+                if st.button(
+                    "example#3:  \nSock shop w/ limited experiment duration",
+                    key="example3",
+                    use_container_width=True
+                ):
                     submit_example(
                         number=3,
                         example_dir=f"{EXAMPLE_DIR}/sock-shop-2",
@@ -424,8 +435,8 @@ def main():
                 # user inputs
                 #-------------
                 with st.chat_message("user"):
-                    st.session_state.message_logger.write("##### Your instructions for Chaos Engineering:")
-                    st.session_state.message_logger.write(input.ce_instructions)
+                    st.session_state.message_logger.write("##### Your instructions for Chaos Engineering:", role="user")
+                    st.session_state.message_logger.write(input.ce_instructions, role="user")
                 #---------------------
                 # chaoseater response
                 #---------------------
@@ -458,14 +469,15 @@ def main():
                                 mime=f"output/zip"
                             )
             else:
-                print(st.session_state.k8s_yamls)
-                st.chat_message("assistant", avatar=CHAOSEATER_ICON).write("Please input your k8s mainfests!")
+                with st.chat_message("assistant", avatar=CHAOSEATER_ICON):
+                    st.session_state.message_logger.write("Please input your k8s mainfests!")
         else:
             if cluster_name == FULL_CAP_MSG:
-                st.chat_message("assistant", avatar=CHAOSEATER_ICON).write(FULL_CAP_MSG)
+                with st.chat_message("assistant", avatar=CHAOSEATER_ICON):
+                    st.session_state.message_logger.write(FULL_CAP_MSG)
             else:
-                st.chat_message("assistant", avatar=CHAOSEATER_ICON).write("Please set your API key!")
-                st.session_state.chat_history.append(HumanMessage(content="test"))
+                with st.chat_message("assistant", avatar=CHAOSEATER_ICON):
+                    st.session_state.message_logger.write("Please set your API key!")
 
     st.session_state.count += 1
 

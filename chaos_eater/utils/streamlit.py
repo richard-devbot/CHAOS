@@ -1,9 +1,16 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Literal, Any
 
 import streamlit as st
 
 from .functions import limit_string_length, MessageLogger
+from .constants import CHAOSEATER_ICON
 
+
+def get_assistant_chat():
+    return st.chat_message("assistant", avatar=CHAOSEATER_ICON)
+
+def get_user_chat():
+    return st.chat_message("user")
 
 # stand-alone spiner in streamlit
 # ref: https://github.com/streamlit/streamlit/issues/6799
@@ -24,10 +31,14 @@ class Spinner:
             self.empty.write(text)
 
 class StreamlitPlaceholder:
-    def __init__(self):
+    def __init__(
+        self,
+        role: Literal["user", "assistant"]
+    ) -> None:
         self.placeholder = st.empty()
         self.type = ""
         self.content = ""
+        self.role = role
 
     def write(self, text: str) -> None:
         self.placeholder.write(text)
@@ -42,14 +53,24 @@ class StreamlitPlaceholder:
 
     def expander(self, text: str, expanded: bool = True):
         self.type = "expander"
-        self.content = StreamlitExpander(text, expanded, self.placeholder)
+        self.content = StreamlitExpander(
+            text=text,
+            role=self.role,
+            expanded=expanded,
+            parent_placeholder=self.placeholder
+        )
         return self.content
 
 class StreamlitContainer:
-    def __init__(self, border: bool = False) -> None:
+    def __init__(
+        self,
+        role: Literal["user", "assistant"],
+        border: bool = False,
+    ) -> None:
         self.container = st.container(border=border)
         self.type = "container"
         self.border = border
+        self.role = role
         self.children = []
 
     def __enter__(self):
@@ -59,18 +80,28 @@ class StreamlitContainer:
         pass
 
     def write(self, text: str) -> None:
-        self.children.append({"type": "write", "content": text})
+        self.children.append({
+            "type": "write",
+            "role": self.role,
+            "content": text
+        })
         self.container.write(text)
 
     def code(self, code: str, language: str = None) -> None:
-        self.children.append({"type": "code", "content": code, "language": language})
+        self.children.append({
+            "type": "code",
+            "role": self.role,
+            "content": code,
+            "language": language
+        })
         self.container.code(code, language=language)
 
     def placeholder(self) -> StreamlitPlaceholder:
         with self.container:
-            placeholder = StreamlitPlaceholder()
+            placeholder = StreamlitPlaceholder(self.role)
         self.children.append({
             "type": "placeholder",
+            "role": self.role,
             "content": placeholder
         })
         return placeholder
@@ -84,6 +115,7 @@ class StreamlitExpander:
     def __init__(
         self,
         text: str,
+        role: Literal["user", "assistant"],
         expanded: bool = True,
         parent_placeholder: StreamlitPlaceholder = None
     ):
@@ -93,6 +125,7 @@ class StreamlitExpander:
             self.expander = parent_placeholder.expander(text, expanded=expanded)
         self.text = text
         self.expanded = expanded
+        self.role = role
         self.children = []
 
     def __enter__(self):
@@ -102,18 +135,28 @@ class StreamlitExpander:
         pass
 
     def write(self, text: str) -> None:
-        self.children.append({"type": "write", "content": text})
+        self.children.append({
+            "type": "write",
+            "role": self.role,
+            "content": text
+        })
         self.expander.write(text)
 
     def code(self, code: str, language: str = None) -> None:
-        self.children.append({"type": "code", "content": code, "language": language})
+        self.children.append({
+            "type": "code",
+            "role": self.role,
+            "content": code, 
+            "language": language
+        })
         self.expander.code(code, language=language)
 
     def container(self, border: bool = False) -> StreamlitContainer:
         with self.expander:
-            cont = StreamlitContainer(border=border)
+            cont = StreamlitContainer(role=self.role, border=border)
         self.children.append({
             "type": "container",
+            "role": self.role,
             "border": border,
             "content": cont
         })
@@ -121,17 +164,28 @@ class StreamlitExpander:
 
     def placeholder(self) -> StreamlitPlaceholder:
         with self.expander:
-            placeholder = StreamlitPlaceholder()
+            placeholder = StreamlitPlaceholder(self.role)
         self.children.append({
             "type": "placeholder",
+            "role": self.role,
             "content": placeholder
         })
         return placeholder
 
 class StreamlitLogger(MessageLogger):
-    def write(self, text: str) -> None:
+    def __init__(self) -> None:
+        super().__init__()
+        self.prev_role = ""
+        self.speaker = None
+
+    def write(
+        self,
+        text: str,
+        role: Literal["user", "assistant"] = "assistant"
+    ) -> None:
         self.messages.append({
             "type": "write",
+            "role": role,
             "content": text
         })
         st.write(text)
@@ -139,19 +193,25 @@ class StreamlitLogger(MessageLogger):
     def code(
         self,
         code: str,
-        language: str = None
+        language: str = None,
+        role: Literal["user", "assistant"] = "assistant"
     ) -> None:
         self.messages.append({
             "type": "code",
+            "role": role,
             "content": code,
             "language": language
         })
         st.code(code, language=language)
 
-    def placeholder(self) -> StreamlitPlaceholder:
-        placeholder = StreamlitPlaceholder()
+    def placeholder(
+        self,
+        role: Literal["user", "assistant"] = "assistant"
+    ) -> StreamlitPlaceholder:
+        placeholder = StreamlitPlaceholder(role)
         self.messages.append({
             "type": "placeholder",
+            "role": role,
             "content": placeholder
         })
         return placeholder
@@ -159,28 +219,45 @@ class StreamlitLogger(MessageLogger):
     def subheader(
         self,
         text: str,
-        divider: str
+        divider: str,
+        role: Literal["user", "assistant"] = "assistant"
     ) -> None:
         self.messages.append({
             "type": "subheader",
+            "role": role,
             "content": text,
             "divider": divider
         })
         st.subheader(text, divider=divider)
 
-    def container(self, border: bool = False) -> StreamlitContainer:
-        cont = StreamlitContainer(border=border)
+    def container(
+        self,
+        border: bool = False,
+        role: Literal["user", "assistant"] = "assistant"
+    ) -> StreamlitContainer:
+        cont = StreamlitContainer(role=role, border=border)
         self.messages.append({
             "type": "container",
+            "role": role,
             "border": border,
             "content": cont
         })
         return cont
     
-    def expander(self, text: str, expanded: bool = True) -> StreamlitExpander:
-        expander = StreamlitExpander(text, expanded)
+    def expander(
+        self,
+        text: str,
+        expanded: bool = True,
+        role: Literal["user", "assistant"] = "assistant"
+    ) -> StreamlitExpander:
+        expander = StreamlitExpander(
+            text=text,
+            role=role,
+            expanded=expanded
+        )
         self.messages.append({
             "type": "expander",
+            "role": role,
             "content": expander
         })
         return expander
@@ -189,11 +266,13 @@ class StreamlitLogger(MessageLogger):
         self,
         url: str,
         height: int,
-        scrolling: bool
+        scrolling: bool,
+        role: Literal["user", "assistant"] = "assistant"
     ) -> None:
         st.components.v1.iframe(url, height=height, scrolling=scrolling)
         self.messages.append({
             "type": "iframe",
+            "role": role,
             "content": url,
             "height": height,
             "scrolling": scrolling
@@ -202,7 +281,19 @@ class StreamlitLogger(MessageLogger):
     def display_history(self) -> None:
         self._render_messages(self.messages)
 
-    def _render_messages(self, messages, parent=None) -> None:
+    def _render_messages(
+        self,
+        messages
+    ) -> None:
+        for message in messages:
+            role = message["role"]
+            if self.prev_role != role:
+                self.speaker = get_assistant_chat() if role == "assistant" else get_user_chat()
+                self.prev_role = role
+            with self.speaker:
+                self._render_messages_recursive([message])
+
+    def _render_messages_recursive(self, messages: List[dict]) -> None:
         for message in messages:
             t = message["type"]
             if t == "write":
@@ -219,10 +310,10 @@ class StreamlitLogger(MessageLogger):
                 )
             elif t == "container":
                 with st.container(border=message["border"]):
-                    self._render_messages(message["content"].children)
+                    self._render_messages_recursive(message["content"].children)
             elif t == "expander":
                 with st.expander(message["content"].text, expanded=message["content"].expanded):
-                    self._render_messages(message["content"].children)
+                    self._render_messages_recursive(message["content"].children)
             elif t == "placeholder":
                 if hasattr(message["content"], "type") and message["content"].type == "write":
                     st.write(message["content"].content)
@@ -230,7 +321,7 @@ class StreamlitLogger(MessageLogger):
                     st.code(message["content"].content, language=message["content"].language)
                 elif hasattr(message["content"], "type") and message["content"].type == "expander":
                     with st.expander(message["content"].content.text, expanded=message["content"].content.expanded):
-                        self._render_messages(message["content"].content.children)
+                        self._render_messages_recursive(message["content"].content.children)
 
 class StreamlitDisplayHandler:
     """Display handler implementation for Streamlit UI"""
