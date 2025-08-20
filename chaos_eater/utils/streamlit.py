@@ -1,4 +1,7 @@
-from typing import List, Dict, Literal, Any
+import pickle
+from typing import List, Dict, Literal, TypeVar, Any
+T = TypeVar("T", bound="StreamlitLogger")
+# TODO: python 3.11+ supports from typing import Self
 
 import streamlit as st
 
@@ -40,6 +43,15 @@ class StreamlitPlaceholder:
         self.content = ""
         self.role = role
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["placeholder"] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.placeholder = st.empty()
+
     def write(self, text: str) -> None:
         self.placeholder.write(text)
         self.type = "write"
@@ -72,6 +84,15 @@ class StreamlitContainer:
         self.border = border
         self.role = role
         self.children = []
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["container"] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.container = st.container(border=self.border)
 
     def __enter__(self):
         return self
@@ -128,6 +149,15 @@ class StreamlitExpander:
         self.role = role
         self.children = []
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["expander"] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.expander = st.expander(self.text, expanded=self.expanded)
+
     def __enter__(self):
         return self
 
@@ -176,6 +206,15 @@ class StreamlitLogger(MessageLogger):
     def __init__(self) -> None:
         super().__init__()
         self.prev_role = ""
+        self.speaker = None
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["speaker"] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
         self.speaker = None
 
     def write(
@@ -322,6 +361,15 @@ class StreamlitLogger(MessageLogger):
                 elif hasattr(message["content"], "type") and message["content"].type == "expander":
                     with st.expander(message["content"].content.text, expanded=message["content"].content.expanded):
                         self._render_messages_recursive(message["content"].content.children)
+
+    def save(self, path: str) -> None:
+        with open(path, "wb") as f:
+            pickle.dump(self, f)
+
+    @classmethod
+    def load(cls: type[T], path: str) -> T:
+        with open(path, "rb") as f:
+            return pickle.load(f)
 
 class StreamlitDisplayHandler:
     """Display handler implementation for Streamlit UI"""
