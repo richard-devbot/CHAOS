@@ -554,9 +554,6 @@ class StreamlitUsageDisplayCallback(ChaosEaterCallback):
     def on_experiment_plan_end(self, logs: List[LLMLog]) -> None:
         self.display_usage_w_update(logs)
 
-    def on_experiment_end(self, logs: List[LLMLog]) -> None:
-        self.display_usage_w_update(logs)
-
     def on_experiment_replan_end(self, logs: List[LLMLog]) -> None:
         self.display_usage_w_update(logs)
 
