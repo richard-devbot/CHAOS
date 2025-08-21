@@ -621,3 +621,77 @@ class StreamlitUsageDisplayCallback(ChaosEaterCallback):
 
     def on_postprocess_end(self, logs: List[LLMLog]) -> None:
         self.display_usage_w_update(logs)
+
+
+class StreamlitInterruptCallback(ChaosEaterCallback):
+    def _check_stop(self):
+        if "stop" in st.session_state:
+            if st.session_state.stop:
+                st.session_state.stop = False
+                st.rerun()
+
+    #--------------------
+    # preprocess Phase
+    #--------------------
+    def on_preprocess_start(self):
+        self._check_stop()
+
+    def on_preprocess_end(self, logs: List[LLMLog]):
+        self._check_stop()
+
+    #--------------------
+    # hypothesis phase
+    #--------------------
+    def on_hypothesis_start(self):
+        self._check_stop()
+
+    def on_hypothesis_end(self, logs: List[LLMLog]):
+        self._check_stop()
+
+    #--------------------
+    # experiment phase
+    #--------------------
+    def on_experiment_plan_start(self):
+        self._check_stop()
+
+    def on_experiment_plan_end(self, logs: List[LLMLog]):
+        self._check_stop()
+
+    def on_experiment_start(self):
+        self._check_stop()
+
+    def on_experiment_end(self):
+        self._check_stop()
+
+    def on_experiment_replan_start(self):
+        self._check_stop()
+
+    def on_experiment_replan_end(self, logs: List[LLMLog]):
+        self._check_stop()
+
+    #--------------------
+    # analysis phase
+    #--------------------
+    def on_analysis_start(self):
+        self._check_stop()
+
+    def on_analysis_end(self, logs: List[LLMLog]):
+        self._check_stop()
+
+    #--------------------
+    # improvement phase
+    #--------------------
+    def on_improvement_start(self):
+        self._check_stop()
+
+    def on_improvement_end(self, logs: List[LLMLog]):
+        self._check_stop()
+
+    #---------------------
+    # postprocess phase
+    #---------------------
+    def on_postprocess_start(self):
+        self._check_stop()
+
+    def on_postprocess_end(self, logs: List[LLMLog]):
+        self._check_stop()

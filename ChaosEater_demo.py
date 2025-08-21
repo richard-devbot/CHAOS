@@ -19,7 +19,8 @@ from chaos_eater.utils.k8s import remove_all_resources_by_namespace
 from chaos_eater.utils.schemas import File
 from chaos_eater.utils.constants import CHAOSEATER_IMAGE_PATH, CHAOSEATER_LOGO_PATH, CHAOSEATER_ICON, CHAOSEATER_IMAGE
 from chaos_eater.utils.exceptions import ModelNotFoundError
-from chaos_eater.utils.streamlit import StreamlitLogger, StreamlitUsageDisplayCallback
+from chaos_eater.utils.streamlit import StreamlitLogger, StreamlitUsageDisplayCallback, StreamlitInterruptCallback
+
 
 # for debug
 from langchain.globals import set_verbose
@@ -154,6 +155,7 @@ def main():
         #----------
         # settings
         #----------
+        stop_button = st.empty()
         with st.expander("General settings", expanded=True):
             #-----------------
             # model selection
@@ -484,6 +486,9 @@ def main():
                 if len(avail_cluster_list) > 0 and avail_cluster_list[0] != FULL_CAP_MSG:
                     r = redis.Redis(host='localhost', port=6379, db=0)
                     r.hset("cluster_usage", st.session_state.session_id, cluster_name)
+                # display stop button
+                if stop_button.button("⏹ Stop", use_container_width=True):
+                    st.session_state.stop = True
                 with st.chat_message("assistant", avatar=CHAOSEATER_ICON):
                     output = st.session_state.chaoseater.run_ce_cycle(
                         input=input,
@@ -494,7 +499,10 @@ def main():
                         clean_cluster_after_run=clean_cluster_after_run,
                         max_num_steadystates=max_num_steadystates,
                         max_retries=max_retries,
-                        callbacks=[st.session_state.usage_displayer]
+                        callbacks=[
+                            st.session_state.usage_displayer,
+                            StreamlitInterruptCallback()
+                        ]
                     )
                     # download output
                     output_dir = output.work_dir
