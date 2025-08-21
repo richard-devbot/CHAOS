@@ -18,7 +18,7 @@ from chaos_eater.utils.k8s import remove_all_resources_by_namespace
 from chaos_eater.utils.schemas import File
 from chaos_eater.utils.constants import CHAOSEATER_IMAGE_PATH, CHAOSEATER_LOGO_PATH, CHAOSEATER_ICON, CHAOSEATER_IMAGE
 from chaos_eater.utils.exceptions import ModelNotFoundError
-from chaos_eater.utils.streamlit import StreamlitLogger
+from chaos_eater.utils.streamlit import StreamlitLogger, StreamlitUsageDisplayCallback
 
 # for debug
 from langchain.globals import set_verbose
@@ -238,9 +238,7 @@ def main():
         # usage: tokens and billing
         #---------------------------
         with st.expander("Usage", expanded=True):
-            # st.write("Token usage:")
-            st.session_state.usage = st.empty()
-            st.session_state.usage.write(f"Total billing: $0  \nTotal tokens: 0  \nInput tokens: 0  \nOuput tokens: 0")
+            st.session_state.usage_displayer = StreamlitUsageDisplayCallback(model_name)
         
         #-----------------
         # command history
@@ -487,7 +485,8 @@ def main():
                         clean_cluster_before_run=clean_cluster_before_run,
                         clean_cluster_after_run=clean_cluster_after_run,
                         max_num_steadystates=max_num_steadystates,
-                        max_retries=max_retries
+                        max_retries=max_retries,
+                        callbacks=[st.session_state.usage_displayer]
                     )
                     # download output
                     output_dir = output.work_dir

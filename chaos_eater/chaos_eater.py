@@ -3,8 +3,6 @@ import time
 import subprocess
 from typing import List, Dict
 
-import streamlit as st
-
 from .preprocessing.preprocessor import PreProcessor, ChaosEaterInput
 from .hypothesis.hypothesizer import Hypothesizer
 from .experiment.experimenter import Experimenter
@@ -14,10 +12,11 @@ from .postprocessing.postprocessor import PostProcessor, ChaosCycle
 from .ce_tools.ce_tool_base import CEToolBase
 from .utils.constants import SKAFFOLD_YAML_TEMPLATE_PATH
 from .utils.wrappers import BaseModel, LLM
-from .utils.llms import LLMLog, PRICING_PER_TOKEN
+from .utils.llms import LLMLog
 from .utils.streamlit import StreamlitDisplayHandler, Spinner
 from .utils.k8s import remove_all_resources_by_labels, remove_all_resources_by_namespace
 from .utils.schemas import File
+from .utils.callbacks import ChaosEaterCallback
 from .utils.functions import (
     write_file,
     delete_file,
@@ -37,24 +36,6 @@ class ChaosEaterOutput(BaseModel):
     logs: Dict[str, List[LLMLog] | List[List[LLMLog]]] = {}
     run_time: Dict[str, float | List[float]] = {}
     ce_cycle: ChaosCycle = ChaosCycle()
-
-def display_usage(logs: List[LLMLog]) -> None:
-    if "input_tokens" not in st.session_state:
-        st.session_state.input_tokens = 0
-    if "output_tokens" not in st.session_state:
-        st.session_state.output_tokens = 0
-    if "total_tokens" not in st.session_state:
-        st.session_state.total_tokens = 0
-    UNIT = 1000
-    for log in logs:
-        usage = log.token_usage
-        st.session_state.input_tokens += usage.input_tokens
-        st.session_state.output_tokens += usage.output_tokens
-        st.session_state.total_tokens += usage.total_tokens
-    if "model_name" in st.session_state:
-        billing = st.session_state.input_tokens * PRICING_PER_TOKEN[st.session_state.model_name]["input"] + \
-                st.session_state.output_tokens * PRICING_PER_TOKEN[st.session_state.model_name]["output"]
-        st.session_state.usage.write(f"Total billing: ${billing:.2f}  \nTotal tokens: {st.session_state.total_tokens/UNIT}k  \nInput tokens: {st.session_state.input_tokens/UNIT}k  \nOuput tokens: {st.session_state.output_tokens/UNIT}k")
 
 
 class ChaosEater:
@@ -95,7 +76,8 @@ class ChaosEater:
         clean_cluster_after_run: bool = True,
         is_new_deployment: bool = True,
         max_num_steadystates: int = 2,
-        max_retries: int = 3
+        max_retries: int = 3,
+        callbacks: List[ChaosEaterCallback] = []
     ) -> ChaosEaterOutput:
         self.message_logger.subheader("Phase 0: Preprocessing", divider="gray")
         # clean the cluster
@@ -125,6 +107,8 @@ class ChaosEater:
         #-----------------------------------------------------------------
         # 0. preprocessing (input deployment & validation and reflection)
         #-----------------------------------------------------------------
+        for cb in callbacks:
+            cb.on_preprocess_start()
         start_time = time.time()
         preprcess_logs, data = self.preprocessor.process(
             input=input,
@@ -137,11 +121,14 @@ class ChaosEater:
         ce_output.logs["preprocess"] = preprcess_logs
         ce_output.ce_cycle.processed_data = data
         save_json(f"{output_dir}/output.json", ce_output.dict()) # save intermediate results
-        display_usage(preprcess_logs)
+        for cb in callbacks:
+            cb.on_preprocess_end(preprcess_logs)
 
         #---------------
         # 1. hypothesis
         #---------------
+        for cb in callbacks:
+            cb.on_hypothesis_start()
         self.message_logger.subheader("Phase 1: Hypothesis", divider="gray")
         start_time = time.time()
         hypothesis_logs, hypothesis = self.hypothesizer.hypothesize(
@@ -155,12 +142,15 @@ class ChaosEater:
         ce_output.logs["hypothesis"] = hypothesis_logs
         ce_output.ce_cycle.hypothesis = hypothesis
         save_json(f"{output_dir}/output.json", ce_output.dict()) # save intermediate results
-        display_usage(hypothesis_logs)
+        for cb in callbacks:
+            cb.on_hypothesis_end(hypothesis_logs)
 
         #---------------------
         # 2. Chaos Experiment
         #---------------------
         self.message_logger.subheader("Phase 2: Chaos Experiment", divider="gray")
+        for cb in callbacks:
+            cb.on_experiment_plan_start()
         # 2.1. plan a chaos experiment
         start_time = time.time()
         experiment_logs, experiment = self.experimenter.plan_experiment(
@@ -172,7 +162,8 @@ class ChaosEater:
         ce_output.logs["experiment_plan"] = experiment_logs
         ce_output.ce_cycle.experiment=experiment
         save_json(f"{output_dir}/output.json", ce_output.dict())
-        display_usage(experiment_logs)
+        for cb in callbacks:
+            cb.on_experiment_plan_end(experiment_logs)
 
         #------------------
         # improvement loop
@@ -189,13 +180,17 @@ class ChaosEater:
         mod_dir_history = [mod_dir]
         while (1):
             # 2.2. conduct the chaos experiment
+            for cb in callbacks:
+                cb.on_experiment_start()
             start_time = time.time()
             experiment_result = self.experimenter.run(experiment, kube_context=kube_context)
             ce_output.run_time["experiment_execution"].append(time.time() - start_time)
             ce_output.ce_cycle.result_history.append(experiment_result)
             save_json(f"{output_dir}/output.json", ce_output.dict())
+            for cb in callbacks:
+                cb.on_experiment_end()
 
-            # 
+            # check if the hypothesis is satisfied
             if experiment_result.all_tests_passed:
                 self.message_logger.write("##### Your k8s yaml already has good resilience!!!")
                 break
@@ -210,6 +205,8 @@ class ChaosEater:
             #-------------
             # 3. analysis
             #-------------
+            for cb in callbacks:
+                cb.on_analysis_start()
             self.message_logger.subheader("Phase 3: Analysis", divider="gray")
             start_time = time.time()
             analysis_logs, analysis = self.analyzer.analyze(
@@ -225,11 +222,14 @@ class ChaosEater:
             ce_output.logs["analysis"].append(analysis_logs)
             ce_output.ce_cycle.analysis_history.append(analysis)
             save_json(f"{output_dir}/output.json", ce_output.dict())
-            display_usage(analysis_logs)
+            for cb in callbacks:
+                cb.on_analysis_end(analysis_logs)
 
             #----------------
             # 4. improvement
             #----------------
+            for cb in callbacks:
+                cb.on_improvement_start()
             self.message_logger.subheader("Phase 4: Improvement", divider="gray")
             start_time = time.time()
             reconfig_logs, reconfig = self.improver.reconfigure(
@@ -249,7 +249,8 @@ class ChaosEater:
             ce_output.logs["improvement"].append(reconfig_logs)
             ce_output.ce_cycle.reconfig_history.append(reconfig)
             save_json(f"{output_dir}/output.json", ce_output.dict())
-            display_usage(reconfig_logs)
+            for cb in callbacks:
+                cb.on_improvement_end(reconfig_logs)
 
             #-------------------------------
             # preparation for the next loop
@@ -353,6 +354,8 @@ class ChaosEater:
             #------------------------------------------------------
             # replan the experiment (modify only fault selectorss)
             #------------------------------------------------------
+            for cb in callbacks:
+                cb.on_experiment_replan_start()
             start_time = time.time()
             experiment_logs, experiment = self.experimenter.replan_experiment(
                 prev_k8s_yamls=prev_k8s_yamls,
@@ -366,11 +369,14 @@ class ChaosEater:
             ce_output.logs["experiment_replan"] = experiment_logs
             ce_output.ce_cycle.experiment = experiment
             save_json(f"{output_dir}/output.json", ce_output.dict())
-            display_usage(experiment_logs)
+            for cb in callbacks:
+                cb.on_experiment_replan_end(experiment_logs)
 
         #------------------------------
         # 5. post-processing (summary)
         #------------------------------
+        for cb in callbacks:
+            cb.on_postprocess_start()
         self.message_logger.subheader("Phase EX: Postprocessing", divider="gray")
         ce_output.ce_cycle.completes_reconfig = True
         save_json(f"{output_dir}/output.json", ce_output.dict())
@@ -381,7 +387,8 @@ class ChaosEater:
         ce_output.logs["summary"] = summary_logs
         ce_output.ce_cycle.summary = summary
         save_json(f"{output_dir}/output.json", ce_output.dict())
-        display_usage(summary_logs)
+        for cb in callbacks:
+            cb.on_postprocess_end(summary_logs)
 
         #----------
         # epilogue

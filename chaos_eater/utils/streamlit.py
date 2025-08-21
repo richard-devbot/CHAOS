@@ -5,8 +5,10 @@ T = TypeVar("T", bound="StreamlitLogger")
 
 import streamlit as st
 
+from .callbacks import ChaosEaterCallback
 from .functions import limit_string_length, MessageLogger
 from .constants import CHAOSEATER_ICON
+from .llms import LLMLog, PRICING_PER_TOKEN
 
 
 def get_assistant_chat():
@@ -512,3 +514,57 @@ class StreamlitDisplayContainer:
 
     def get_subsubcontainer(self, id: str):
         return self.get_item_from_id(self.subsubcontainers, id)
+    
+
+class StreamlitUsageDisplayCallback(ChaosEaterCallback):
+    def __init__(self, model_name: str) -> None:
+        if "input_tokens" not in st.session_state:
+            st.session_state.input_tokens = 0
+        if "output_tokens" not in st.session_state:
+            st.session_state.output_tokens = 0
+        if "total_tokens" not in st.session_state:
+            st.session_state.total_tokens = 0
+        self.model_name = model_name
+        self.usage_container = st.empty()
+        self.display_usage()
+
+    def update(self, logs: List[LLMLog]) -> None:
+        for log in logs:
+            usage = log.token_usage
+            st.session_state.input_tokens  += usage.input_tokens
+            st.session_state.output_tokens += usage.output_tokens
+            st.session_state.total_tokens  += usage.total_tokens
+
+    def display_usage(self) -> None:
+        UNIT = 1000
+        billing = st.session_state.input_tokens * PRICING_PER_TOKEN[self.model_name]["input"] + \
+                  st.session_state.output_tokens * PRICING_PER_TOKEN[self.model_name]["output"]
+        self.usage_container.write(f"Total billing: ${billing:.2f}  \nTotal tokens: {st.session_state.total_tokens/UNIT}k  \nInput tokens: {st.session_state.input_tokens/UNIT}k  \nOuput tokens: {st.session_state.output_tokens/UNIT}k")
+
+    def display_usage_w_update(self, logs: List[LLMLog]) -> None:
+        self.update(logs)
+        self.display_usage()
+
+    def on_preprocess_end(self, logs: List[LLMLog]) -> None:
+        self.display_usage_w_update(logs)
+
+    def on_hypothesis_end(self, logs: List[LLMLog]) -> None:
+        self.display_usage_w_update(logs)
+
+    def on_experiment_plan_end(self, logs: List[LLMLog]) -> None:
+        self.display_usage_w_update(logs)
+
+    def on_experiment_end(self, logs: List[LLMLog]) -> None:
+        self.display_usage_w_update(logs)
+
+    def on_experiment_replan_end(self, logs: List[LLMLog]) -> None:
+        self.display_usage_w_update(logs)
+
+    def on_analysis_end(self, logs: List[LLMLog]) -> None:
+        self.display_usage_w_update(logs)
+
+    def on_improvement_end(self, logs: List[LLMLog]) -> None:
+        self.display_usage_w_update(logs)
+
+    def on_postprocess_end(self, logs: List[LLMLog]) -> None:
+        self.display_usage_w_update(logs)
