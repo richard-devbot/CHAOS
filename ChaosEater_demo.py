@@ -3,6 +3,7 @@ import time
 import yaml
 import zipfile
 import subprocess
+from pathlib import Path
 
 import streamlit as st
 import redis
@@ -215,6 +216,7 @@ def main():
         #-------------------
         # history of cycles
         #-------------------
+        clicked_cycle = None
         with st.expander("Cycles", expanded=True):
             logs = find_message_logs(WORK_DIR)
             sorted_logs = sorted(
@@ -229,11 +231,17 @@ def main():
                     use_container_width=True,
                     type="primary" if st.session_state.selected_cycle == name else "secondary"
                 ):
-                    st.session_state.message_logger = StreamlitLogger.load(path)
-                    st.session_state.selected_cycle = name
-                    st.session_state.is_first_run = False
-                    st.rerun()
+                    clicked_cycle = (name, path)
 
+    if clicked_cycle:
+        name, path = clicked_cycle
+        st.session_state.message_logger = StreamlitLogger.load(path)
+        st.session_state.usage_displayer.load(Path(path).with_name("output.json"))
+        st.session_state.selected_cycle = name
+        st.session_state.is_first_run = False
+        st.rerun()
+
+    with st.sidebar:
         #---------------------------
         # usage: tokens and billing
         #---------------------------

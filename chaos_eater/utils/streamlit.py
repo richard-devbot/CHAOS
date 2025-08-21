@@ -528,6 +528,62 @@ class StreamlitUsageDisplayCallback(ChaosEaterCallback):
         self.usage_container = st.empty()
         self.display_usage()
 
+    def load(self, path: str) -> None:
+        import json
+        try:
+            with open(path, 'r') as f:
+                data = json.load(f)
+ 
+            # Reset session state counters
+            st.session_state.input_tokens  = 0
+            st.session_state.output_tokens = 0
+            st.session_state.total_tokens  = 0
+            
+            # Extract logs from the data structure
+            logs_data = data.get('logs', {})
+            
+            # Helper function to extract token usage from nested structures
+            def extract_token_usage(obj):
+                """Recursively extract token_usage from nested structures."""
+                total_input = 0
+                total_output = 0
+                
+                if isinstance(obj, dict):
+                    # Check if this dict has token_usage
+                    if 'token_usage' in obj:
+                        usage = obj['token_usage']
+                        total_input += usage.get('input_tokens', 0)
+                        total_output += usage.get('output_tokens', 0)
+                    
+                    # Recursively check all values
+                    for value in obj.values():
+                        input_tokens, output_tokens = extract_token_usage(value)
+                        total_input += input_tokens
+                        total_output += output_tokens
+                        
+                elif isinstance(obj, list):
+                    # Check all items in list
+                    for item in obj:
+                        input_tokens, output_tokens = extract_token_usage(item)
+                        total_input += input_tokens
+                        total_output += output_tokens
+                
+                return total_input, total_output
+            
+            # Extract token usage from all phases in logs
+            input_tokens, output_tokens = extract_token_usage(logs_data)
+
+            # Update session state
+            st.session_state.input_tokens = input_tokens
+            st.session_state.output_tokens = output_tokens
+            st.session_state.total_tokens = input_tokens + output_tokens
+        except FileNotFoundError:
+            st.error(f"File not found: {path}")
+        except json.JSONDecodeError:
+            st.error(f"Invalid JSON file: {path}")
+        except Exception as e:
+            st.error(f"Error loading file: {str(e)}")
+
     def update(self, logs: List[LLMLog]) -> None:
         for log in logs:
             usage = log.token_usage
