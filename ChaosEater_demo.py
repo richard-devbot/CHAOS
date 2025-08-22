@@ -10,10 +10,10 @@ import redis
 from streamlit.runtime.scriptrunner.script_run_context import get_script_run_ctx
 from streamlit_extras.bottom_container import bottom
 
+import chaos_eater.utils.app_utils as app_utils
 from chaos_eater.chaos_eater import ChaosEater, ChaosEaterInput
 from chaos_eater.ce_tools.ce_tool import CEToolType, CETool
-import chaos_eater.utils.app_utils as app_utils
-from chaos_eater.utils.llms import load_llm
+from chaos_eater.utils.llms import load_llm, check_existing_key, get_env_key_name
 from chaos_eater.utils.functions import get_timestamp, type_cmd, is_binary
 from chaos_eater.utils.k8s import remove_all_resources_by_namespace
 from chaos_eater.utils.schemas import File
@@ -62,10 +62,10 @@ def init_choaseater(
     port: int = 8000,
     seed: int = 42
 ) -> None:
-    # TODO: comment out when publish this code
-    # if st.session_state.openai_key == "":
-    #     return
-    # os.environ['OPENAI_API_KEY'] = st.session_state.openai_key
+    provider = model_name.split("/")[0]
+    if provider in ["openai", "anthropic", "google"]:
+        if st.session_state.api_key != "":
+            os.environ[get_env_key_name(provider)] = st.session_state.api_key
     try:
         llm = load_llm(
             model_name=model_name, 
@@ -177,10 +177,16 @@ def main():
             else:
                 model_name = selected_model
             if model_name.startswith(("openai", "google", "anthropic")):
+                provider = model_name.split("/")[0]
+                has_valid_key = check_existing_key(provider)
+                if has_valid_key:
+                    help_text = f"A valid {provider.capitalize()} API key is already set"
+                else:
+                    help_text = f"Enter your {provider.capitalize()} API key"
                 st.text_input(
                     label="API key",
-                    key="openai_key",
-                    placeholder="Your API key",
+                    key="api_key",
+                    placeholder=help_text,
                     type="password"
                 )
             

@@ -1,7 +1,9 @@
+import os
 import requests
 from typing import List, Tuple, Callable, Iterator
 
 import tiktoken
+import openai
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_anthropic import ChatAnthropic
@@ -269,3 +271,52 @@ PRICING_PER_TOKEN = {
         "output": 15. / UNIT
     },
 }
+
+def verify_api_key(provider: str, api_key: str) -> bool:
+    if not api_key:
+        return False
+    try:
+        if provider == "openai":
+            client = openai.OpenAI(api_key=api_key)
+            try:
+                client.models.list()
+            except openai.AuthenticationError:
+                return False
+            else:
+                return True
+        elif provider == "anthropic":
+            headers = {
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01"
+            }
+            response = requests.get(
+                "https://api.anthropic.com/v1/models",
+                headers=headers,
+                timeout=5
+            )
+            return response.status_code == 200
+        elif provider == "google":
+            response = requests.get(
+                f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}",
+                timeout=5
+            )
+            return response.status_code == 200
+    except Exception:
+        return False
+    return False
+
+def get_env_key_name(provider: str) -> str:
+    env_keys = {
+        "openai": "OPENAI_API_KEY",
+        "google": "GOOGLE_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY"
+    }
+    return env_keys.get(provider, "API_KEY")
+
+def check_existing_key(provider: str) -> bool:
+    env_key_name = get_env_key_name(provider)
+    existing_key = os.environ.get(env_key_name)
+    if existing_key:
+        if verify_api_key(provider, existing_key):
+            return True
+    return False
