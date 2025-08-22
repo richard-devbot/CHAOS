@@ -4,6 +4,7 @@ from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, BaseModel, Field
 from ....utils.llms import build_json_agent, LoggingCallback, LLMLog
 from ....utils.streamlit import StreamlitContainer
+from ....utils.functions import StreamDebouncer
 
 
 #---------
@@ -67,11 +68,25 @@ class SteadyStateDraftAgent:
         prev_check_thought: str,
         display_container: StreamlitContainer
     ) -> Tuple[LLMLog, Dict[str, str]]:
+        # initialization
         logger = LoggingCallback(name="steady_state_draft", llm=self.llm)
+        debouncer = StreamDebouncer()
         container_id = "description"
         display_container.create_subcontainer(id=container_id, header=f"##### 💬 Description")
         display_container.create_subsubcontainer(subcontainer_id=container_id, subsubcontainer_id=container_id)
         prev_check_thought = prev_check_thought if prev_check_thought != "" else "No steady states have been defined, so a new steady state needs to be defined."
+        
+        # define display function
+        def display_response(response: dict) -> None:
+            if (thought := response["thought"]) is not None:
+                display_container.update_subsubcontainer(thought, container_id)
+            if (name := response["name"]) is not None:
+                display_container.update_header(
+                    f"##### Steady state #{predefined_steady_states.count+1}: {name}",
+                    expanded=True
+                )
+        
+        # stream the response
         for steady_state in self.agent.stream({
             "user_input": input_data.to_k8s_overview_str(), 
             "ce_instructions": input_data.ce_instructions,
@@ -79,8 +94,7 @@ class SteadyStateDraftAgent:
             "prev_check_thought": prev_check_thought},
             {"callbacks": [logger]}
         ):
-            if (thought := steady_state["thought"]) is not None:
-                display_container.update_subsubcontainer(thought, container_id)
-            if (name := steady_state["name"]) is not None:
-                display_container.update_header(f"##### Steady state #{predefined_steady_states.count+1}: {name}", expanded=True)
+            if debouncer.should_update():
+                display_response(steady_state)
+        display_response(steady_state)
         return logger.log, steady_state

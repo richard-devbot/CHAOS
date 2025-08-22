@@ -5,6 +5,7 @@ from ....ce_tools.ce_tool_base import CEToolBase
 from ....utils.wrappers import LLM, LLMBaseModel, LLMField
 from ....utils.llms import build_json_agent, LLMLog, LoggingCallback
 from ....utils.streamlit import StreamlitDisplayContainer
+from ....utils.functions import StreamDebouncer
 
 
 SYS_ASSUME_FAULT_SCENARIOS = """\
@@ -62,13 +63,23 @@ class FaultScenarioAgent:
         display_container: StreamlitDisplayContainer
     ) -> Tuple[LLMLog, Dict[str, str]]:
         logger = LoggingCallback(name="fault_scenario_assumption", llm=self.llm)
+        debouncer = StreamDebouncer()
         description_id = "fault_description"
         injection_id = "fault_injections"
         display_container.create_subcontainer(id=description_id, header=f"##### 💬 Description")
         display_container.create_subsubcontainer(subcontainer_id=description_id, subsubcontainer_id=description_id)
         display_container.create_subcontainer(id=injection_id, header=f"##### 🐞 Fault-injection sequence")
         display_container.create_subsubcontainer(subcontainer_id=injection_id, subsubcontainer_id=injection_id)
-        for token in self.agent.stream({
+        
+        def display_response(response: dict) -> None:
+            if (event := response.get("event")) is not None:
+                display_container.update_header(f"##### ⬜ Scenario: {event}", expanded=True)
+            if (description := response.get("thought")) is not None:
+                display_container.update_subsubcontainer(description, description_id)
+            if (faults := response.get("faults"))is not None:
+                display_container.update_subsubcontainer(self.convert_fault_list_to_str(faults), injection_id)
+    
+        for response in self.agent.stream({
             "user_input": user_input,
             "ce_instructions": ce_instructions,
             "steady_states": steady_states.to_overview_str(),
@@ -76,13 +87,10 @@ class FaultScenarioAgent:
             "ce_tool_fault_types": self.ce_tool.get_chaos_var_candidates()},
             {"callbacks": [logger]}
         ):
-            if (event := token.get("event")) is not None:
-                display_container.update_header(f"##### ⬜ Scenario: {event}", expanded=True)
-            if (description := token.get("thought")) is not None:
-                display_container.update_subsubcontainer(description, description_id)
-            if (faults := token.get("faults"))is not None:
-                display_container.update_subsubcontainer(self.convert_fault_list_to_str(faults), injection_id)
-        return logger.log, token
+            if debouncer.should_update():
+                display_response(response)
+        display_response(response)
+        return logger.log, response
     
     def convert_fault_list_to_str(self, faults: List[List[Fault]]) -> str:
         fault_list = ""

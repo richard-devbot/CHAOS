@@ -3,7 +3,7 @@ from typing import List, Tuple
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField
 from ...utils.llms import build_json_agent, LoggingCallback, LLMLog
 from ...utils.schemas import File
-from ...utils.functions import MessageLogger
+from ...utils.functions import MessageLogger, StreamDebouncer
 
 
 SYS_ASSUME_K8S_APP = """\
@@ -57,6 +57,7 @@ class K8sAppAssumptionAgent:
         k8s_summaries: List[str]
     ) -> Tuple[LLMLog, K8sAppAssumption]:
         logger = LoggingCallback(name="k8s_app", llm=self.llm)
+        debouncer = StreamDebouncer()
         self.message_logger.write("Thoughts:")
         container = self.message_logger.placeholder()
         self.message_logger.write("Assumed application:")
@@ -65,12 +66,26 @@ class K8sAppAssumptionAgent:
             k8s_yamls=k8s_yamls,
             k8s_summaries=k8s_summaries
         )
-        for app in self.agent.stream({"user_input": user_input}, {"callbacks": [logger]}):
-            if (thought := app.get("thought")) is not None:
-                container.write(thought)
-            if (app := app.get("k8s_application")) is not None:
-                container2.write(app)
-        return logger.log, K8sAppAssumption(thought=thought, k8s_application=app)
+        for output in self.agent.stream(
+            {"user_input": user_input},
+            {"callbacks": [logger]}
+        ):
+            if debouncer.should_update():
+                if (thought := output.get("thought")) is not None:
+                    container.write(thought)
+                if (app := output.get("k8s_application")) is not None:
+                    container2.write(app)
+        thought = output.get("thought")
+        app = output.get("k8s_application")
+        container.write(thought)
+        container2.write(app)
+        return (
+            logger.log,
+            K8sAppAssumption(
+                thought=thought,
+                k8s_application=app
+            )
+        )
 
     def get_user_input(
         self,

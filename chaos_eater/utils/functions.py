@@ -486,3 +486,18 @@ class MessageLogger:
     def save(self, filepath: str):
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(self.messages, f, ensure_ascii=False, indent=2)
+
+class StreamDebouncer:
+    def __init__(self, interval: float = 0.5):
+        self.interval = interval
+        self.last_update_time = 0
+
+    def should_update(self) -> bool:
+        current_time = time.time()
+        if current_time - self.last_update_time >= self.interval:
+            self.last_update_time = current_time
+            return True
+        return False
+    
+    def reset(self):
+        self.last_update_time = 0

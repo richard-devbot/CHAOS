@@ -7,7 +7,7 @@ from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, LLMBaseModel, LLMField
 from ....utils.llms import build_json_agent, LLMLog, LoggingCallback
 from ....utils.schemas import File
-from ....utils.functions import write_file, read_file, copy_file, sanitize_filename
+from ....utils.functions import write_file, read_file, copy_file, sanitize_filename, StreamDebouncer
 from ....utils.constants import UNITTEST_BASE_PY_PATH
 from ....utils.streamlit import StreamlitContainer
 
@@ -240,9 +240,23 @@ class UnittestAgent:
         )
 
         # generate a unit test
+        debouncer = StreamDebouncer()
         display_container.create_subsubcontainer(subcontainer_id="unittest", subsubcontainer_id=f"unittest_thought{mod_count}")
         display_container.create_subsubcontainer(subcontainer_id="unittest", subsubcontainer_id=f"unittest{mod_count}")
-        for token in agent.stream({
+        
+        def display_responce(responce: dict) -> Tuple[str, str]:
+            if (thought := responce.get("thought")) is not None:
+                display_container.update_subsubcontainer(thought, f"unittest_thought{mod_count}")
+            if (code := responce.get("code")) is not None:
+                display_container.update_subsubcontainer(
+                    code,
+                    f"unittest{mod_count}",
+                    is_code=True,
+                    language="python" if inspection.tool_type == "k8s" else "javascript"
+                )
+            return thought, code
+
+        for responce in agent.stream({
             "steady_state_name": steady_state_draft["name"],
             "steady_state_thought": steady_state_draft["thought"],
             "command": inspection.script.content,
@@ -250,13 +264,7 @@ class UnittestAgent:
             "steady_state_threshold_description": threshold["reason"]},
             {"callbacks": [self.logger]}
         ):
-            if (thought := token.get("thought")) is not None:
-                display_container.update_subsubcontainer(thought, f"unittest_thought{mod_count}")
-            if (code := token.get("code")) is not None:
-                display_container.update_subsubcontainer(
-                    code,
-                    f"unittest{mod_count}",
-                    is_code=True,
-                    language="python" if inspection.tool_type == "k8s" else "javascript"
-                )
+            if debouncer.should_update():
+                display_responce(responce)
+        thought, code = display_responce(responce)
         return {"thought": thought, "code": code}

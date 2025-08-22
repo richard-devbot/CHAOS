@@ -5,6 +5,7 @@ from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, LLMBaseModel, LLMField
 from ....utils.llms import build_json_agent, LLMLog, LoggingCallback
 from ....utils.streamlit import StreamlitContainer
+from ....utils.functions import StreamDebouncer
 
 
 #---------
@@ -65,10 +66,21 @@ class ThresholdAgent:
         display_container: StreamlitContainer,
     ) -> Tuple[LLMLog, Dict[str, str]]:
         logger = LoggingCallback(name="threshold_definition", llm=self.llm)
+        debouncer = StreamDebouncer()
         display_container.create_subcontainer(id="threshold", header="##### 🚩 Threshold")
         display_container.create_subsubcontainer(subcontainer_id="threshold", subsubcontainer_id=f"threshold_thought")
         display_container.create_subsubcontainer(subcontainer_id="threshold", subsubcontainer_id=f"threshold")
-        for token in self.agent.stream({
+        
+        def display_responce(responce: dict) -> Tuple[str, str]:
+            if (thought := responce.get("thought")) is not None:
+                display_container.update_subsubcontainer(thought, "threshold_thought")
+                steady_state_draft["threshold_reason"] = thought
+            if (threshold := responce.get("threshold")) is not None:
+                display_container.update_subsubcontainer(threshold, "threshold")
+                steady_state_draft["threshold"] = threshold
+            return thought, threshold
+        
+        for responce in self.agent.stream({
             "user_input": input_data.to_k8s_overview_str(),
             "ce_instructions": input_data.ce_instructions,
             "steady_state_name": steady_state_draft["name"],
@@ -76,10 +88,7 @@ class ThresholdAgent:
             "inspection_summary": inspection.to_str()},
             {"callbacks": [logger]}
         ):
-            if (thought := token.get("thought")) is not None:
-                display_container.update_subsubcontainer(thought, "threshold_thought")
-                steady_state_draft["threshold_reason"] = thought
-            if (threshold := token.get("threshold")) is not None:
-                display_container.update_subsubcontainer(threshold, "threshold")
-                steady_state_draft["threshold"] = threshold
+            if debouncer.should_update():
+                display_responce(responce)
+        thought, threshold = display_responce(responce)
         return logger.log, {"threshold": threshold, "reason": thought}

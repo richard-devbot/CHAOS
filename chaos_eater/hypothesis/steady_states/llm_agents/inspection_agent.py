@@ -5,7 +5,7 @@ from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, BaseModel, Field
 from ....utils.llms import build_json_agent, LLMLog, LoggingCallback
 from ....utils.schemas import File
-from ....utils.functions import write_file, dict_to_str, sanitize_filename
+from ....utils.functions import write_file, dict_to_str, sanitize_filename, StreamDebouncer
 from ....utils.streamlit import StreamlitContainer
 
 
@@ -194,19 +194,16 @@ class InspectionAgent:
         #------------------------------
         # generate a inspection script
         #------------------------------
+        debouncer = StreamDebouncer()
         display_container.create_subsubcontainer(subcontainer_id="inspection", subsubcontainer_id=f"inspection_description{mod_count}")
         display_container.create_subsubcontainer(subcontainer_id="inspection", subsubcontainer_id=f"inspection_script{mod_count}")
-        for cmd in agent.stream({
-            "user_input": input_data.to_k8s_overview_str(),
-            "ce_instructions": input_data.ce_instructions,
-            "steady_state_name": steady_state_draft["name"],
-            "steady_state_thought": steady_state_draft["thought"]},
-            {"callbacks": [self.logger]}
-        ):
-            if (thought := cmd.get("thought")) is not None:
+        
+        def display_repsonse(response: dict) -> Tuple[str, str, str, str]:
+            fname = ""; tool_type = ""; code = ""; duration = ""
+            if (thought := response.get("thought")) is not None:
                 display_container.update_subsubcontainer(thought, f"inspection_description{mod_count}")
-            if (tool := cmd.get("tool")) is not None:
-                if (tool_type := cmd.get("tool_type")) is not None:
+            if (tool := response.get("tool")) is not None:
+                if (tool_type := response.get("tool_type")) is not None:
                     if tool_type == "k8s":
                         if (code := tool.get("script")) is not None:
                             duration = tool.get("duration")
@@ -238,6 +235,19 @@ class InspectionAgent:
                                 is_code=True,
                                 language="javascript"
                             )
+            return tool_type, fname, code, duration
+
+        for inspection in agent.stream({
+            "user_input": input_data.to_k8s_overview_str(),
+            "ce_instructions": input_data.ce_instructions,
+            "steady_state_name": steady_state_draft["name"],
+            "steady_state_thought": steady_state_draft["thought"]},
+            {"callbacks": [self.logger]}
+        ):
+            if debouncer.should_update():
+                display_repsonse(inspection)
+        tool_type, fname, code, duration = display_repsonse(inspection)
+
         
         #----------
         # epilogue
@@ -247,7 +257,7 @@ class InspectionAgent:
         fpath = f"{work_dir}/{fname}"
         write_file(fpath, code)
         return (
-            cmd,
+            inspection,
             Inspection(
                 tool_type=tool_type,
                 duration=duration,

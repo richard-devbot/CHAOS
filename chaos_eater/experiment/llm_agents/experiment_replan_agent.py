@@ -18,7 +18,8 @@ from ...utils.functions import (
     get_file_extension,
     sanitize_filename,
     remove_curly_braces,
-    MessageLogger
+    MessageLogger,
+    StreamDebouncer
 )
 from ...utils.schemas import File
 from ...utils.constants import UNITTEST_BASE_PY_PATH
@@ -184,6 +185,7 @@ class ExperimentRePlanAgent:
         curr_k8s_yamls: List[File],
         logger: LoggingCallback
     ) -> None:
+        debouncer = StreamDebouncer()
         fault_injections = experiment_plan["fault_injection"]["fault_injection"]
         for fault_injection in fault_injections:
             self.message_logger.write("Current fault injection settings:")
@@ -191,17 +193,25 @@ class ExperimentRePlanAgent:
             thought_empty = self.message_logger.placeholder()
             self.message_logger.write("Next fault injection scope:")
             selector_empty = self.message_logger.placeholder()
-            for token in self.scope_agent.stream({
+
+            def display_response(response: dict) -> Tuple[str, dict]:
+                if (thought := response.get("thought")) is not None:
+                    thought_empty.write(thought)
+                if (selector := response.get("selector")) is not None:
+                    selector_empty.write(selector)
+                return thought, selector
+
+            for response in self.scope_agent.stream({
                 "prev_k8s_yamls": file_list_to_str(prev_k8s_yamls),
                 "experiment_plan": experiment.to_str(),
                 "curr_k8s_yamls": file_list_to_str(curr_k8s_yamls),
                 "curr_fault_injection": self.get_fault_str(fault_injection)},
                 {"callbacks": [logger]}
             ):
-                if (thought := token.get("thought")) is not None:
-                    thought_empty.write(thought)
-                if (selector := token.get("selector")) is not None:
-                    selector_empty.write(selector)
+                if debouncer.should_update():
+                    display_response(response)
+            _, selector = display_response(response)
+            
             # change the scope
             fault_injection["params"]["selector"] = selector
 
@@ -265,19 +275,27 @@ class ExperimentRePlanAgent:
                 #-----------------------------------------------------
                 # generate an adjusted unittest if needed (first try)
                 #-----------------------------------------------------
+                debouncer = StreamDebouncer()
                 self.message_logger.write("Adjusted unittest")
                 self.thought_empty = self.message_logger.placeholder()
                 self.code_empty = self.message_logger.placeholder()
+
+                def display_response(response: dict) -> Tuple[str, str]:
+                    if (thought := response.get("thought")) is not None:
+                        self.thought_empty.write(thought)
+                    if (code := response.get("code")) is not None:
+                        self.code_empty.code(code)
+                    return thought, code
+                
                 for token in self.unittest_agent.stream({
                     "prev_k8s_yamls": file_list_to_str(prev_k8s_yamls),
                     "prev_unittest": unittest_code,
                     "curr_k8s_yamls": file_list_to_str(curr_k8s_yamls)},
                     {"callbacks": [logger]}
                 ):
-                    if (thought := token.get("thought")) is not None:
-                        self.thought_empty.write(thought)
-                    if (code := token.get("code")) is not None:
-                        self.code_empty.code(code)
+                    if debouncer.should_update():
+                        display_response(token)
+                _, code = display_response(token)
 
                 #-----------------------
                 # validate the unittest
@@ -380,16 +398,23 @@ class ExperimentRePlanAgent:
         #----------------------------------
         # debugging the adjusted unit test
         #----------------------------------
+        debouncer = StreamDebouncer()
         self.message_logger.write("Debugging:")
         self.error_handling_empty = self.message_logger.placeholder()
+
+        def display_response(response: dict) -> None:
+            if (thought := response.get("thought")) is not None:
+                self.error_handling_empty.write(thought)
+            if (code := response.get("code")) is not None:
+                self.code_empty.code(code)
+
         for token in debugging_agent.stream({
             "prev_k8s_yamls": file_list_to_str(prev_k8s_yamls),
             "prev_unittest": unittest_code,
             "curr_k8s_yamls": file_list_to_str(curr_k8s_yamls)},
             {"callbacks": [logger]}
         ):
-            if (thought := token.get("thought")) is not None:
-                self.error_handling_empty.write(thought)
-            if (code := token.get("code")) is not None:
-                self.code_empty.code(code)
+            if debouncer.should_update():
+                display_response(token)
+        display_response(token)
         return token

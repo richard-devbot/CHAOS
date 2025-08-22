@@ -2,7 +2,7 @@ from typing import Tuple
 
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField
 from ...utils.llms import build_json_agent, LoggingCallback, LLMLog
-from ...utils.functions import MessageLogger
+from ...utils.functions import MessageLogger, StreamDebouncer
 
 
 SYS_SUMMARIZE_CE_INSTRUCTIONS = """\
@@ -54,8 +54,15 @@ class CEInstructAgent:
 
     def summarize_ce_instructions(self, ce_instructions: str) -> Tuple[LLMLog, str]:
         logger = LoggingCallback(name="ce_instruction_summary", llm=self.llm)
+        debouncer = StreamDebouncer()
         placeholder = self.message_logger.placeholder()
-        for summary in self.agent.stream({"ce_instructions": ce_instructions}, {"callbacks": [logger]}):
-            if (summary_str := summary.get("ce_instructions")) is not None:
-                placeholder.write(summary_str)
+        for summary in self.agent.stream(
+            {"ce_instructions": ce_instructions},
+            {"callbacks": [logger]}
+        ):
+            if debouncer.should_update():
+                if (summary_str := summary.get("ce_instructions")) is not None:
+                    placeholder.write(summary_str)
+        summary_str = summary.get("ce_instructions")
+        placeholder.write(summary_str)
         return logger.log, summary_str

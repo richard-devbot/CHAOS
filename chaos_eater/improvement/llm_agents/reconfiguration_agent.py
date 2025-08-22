@@ -19,7 +19,8 @@ from ...utils.functions import (
     list_to_bullet_points,
     limit_string_length,
     remove_curly_braces,
-    MessageLogger
+    MessageLogger,
+    StreamDebouncer
 )
 from ...utils.schemas import File
 from ...utils.k8s import remove_all_resources_by_labels
@@ -345,16 +346,12 @@ class ReconfigurationAgent:
         expander = self.message_logger.expander("##### Reconfiguration", expanded=True) 
         thought_box = expander.placeholder()
         k8s_box = []
-        for mod_k8s_yamls in agent.stream({
-            "system_overview": input_data.to_k8s_overview_str(),
-            "hypothesis_overview": hypothesis.to_str(),
-            "experiment_plan_summary": experiment.plan["summary"],
-            "experiment_result": result_history0.to_str()},
-            {"callbacks": [logger]}
-        ):
-            if (thought := mod_k8s_yamls.get("thought")) is not None:
+        debouncer = StreamDebouncer()
+
+        def display_response(response: dict) -> None:
+            if (thought := response.get("thought")) is not None:
                 thought_box.write(thought)
-            if (modified_k8s_yamls := mod_k8s_yamls.get("modified_k8s_yamls")) is not None:
+            if (modified_k8s_yamls := response.get("modified_k8s_yamls")) is not None:
                 for i, mod_k8s_yaml in enumerate(modified_k8s_yamls):
                     if i + 1 > len(k8s_box):
                         k8s_box.append({
@@ -371,6 +368,17 @@ class ReconfigurationAgent:
                         k8s_box[i]["explanation"].write(explanation)
                     if (code := mod_k8s_yaml.get("code")) is not None:
                         k8s_box[i]["code"].code(code, language="yaml")
+
+        for mod_k8s_yamls in agent.stream({
+            "system_overview": input_data.to_k8s_overview_str(),
+            "hypothesis_overview": hypothesis.to_str(),
+            "experiment_plan_summary": experiment.plan["summary"],
+            "experiment_result": result_history0.to_str()},
+            {"callbacks": [logger]}
+        ):
+            if debouncer.should_update():
+                display_response(mod_k8s_yamls)
+        display_response(mod_k8s_yamls)
         return mod_k8s_yamls
     
     def debug_reconfig_yamls(
@@ -421,16 +429,12 @@ class ReconfigurationAgent:
         expander = self.message_logger.expander("##### Reconfiguration", expanded=True)
         thought_box = expander.placeholder()
         k8s_box = []
-        for mod_k8s_yamls in agent.stream({
-            "system_overview": input_data.to_k8s_overview_str(),
-            "hypothesis_overview": hypothesis.to_str(),
-            "experiment_plan_summary": experiment.plan["summary"],
-            "experiment_result": result_history0.to_str()},
-            {"callbacks": [logger]}
-        ):
-            if (thought := mod_k8s_yamls.get("thought")) is not None:
+        debouncer = StreamDebouncer()
+
+        def display_responce(response: dict) -> None:
+            if (thought := response.get("thought")) is not None:
                 thought_box.write(thought)
-            if (modified_k8s_yamls := mod_k8s_yamls.get("modified_k8s_yamls")) is not None:
+            if (modified_k8s_yamls := response.get("modified_k8s_yamls")) is not None:
                 for i, mod_k8s_yaml in enumerate(modified_k8s_yamls):
                     if i + 1 > len(k8s_box):
                         k8s_box.append({
@@ -447,4 +451,15 @@ class ReconfigurationAgent:
                         k8s_box[i]["explanation"].write(explanation)
                     if (code := mod_k8s_yaml.get("code")) is not None:
                         k8s_box[i]["code"].code(code, language="yaml")
+
+        for mod_k8s_yamls in agent.stream({
+            "system_overview": input_data.to_k8s_overview_str(),
+            "hypothesis_overview": hypothesis.to_str(),
+            "experiment_plan_summary": experiment.plan["summary"],
+            "experiment_result": result_history0.to_str()},
+            {"callbacks": [logger]}
+        ):
+            if debouncer.should_update():
+                display_responce(mod_k8s_yamls)
+        display_responce(mod_k8s_yamls)
         return mod_k8s_yamls

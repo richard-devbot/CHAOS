@@ -6,7 +6,14 @@ from ...hypothesis.hypothesizer import Hypothesis
 from ...ce_tools.ce_tool_base import CEToolBase
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField, BaseModel
 from ...utils.llms import build_json_agent, LLMLog, LoggingCallback
-from ...utils.functions import pseudo_streaming_text, parse_time, add_timeunit, sanitize_k8s_name, MessageLogger
+from ...utils.functions import (
+    pseudo_streaming_text,
+    parse_time,
+    add_timeunit,
+    sanitize_k8s_name,
+    MessageLogger,
+    StreamDebouncer
+)
 
 
 SYS_DETERMINE_TIME_SCHEDULE = """\
@@ -197,17 +204,12 @@ class ExperimentPlanAgent:
         plan_container = self.get_plan_items()
         pseudo_streaming_text("##### Planning a CE experiment...", obj=plan_msg)
         logger = LoggingCallback(name="experiment_plan", llm=self.llm)
+        debouncer = StreamDebouncer()
 
         #----------------------
         # plan a time schedule
         #----------------------
-        for time_schedule in self.time_schedule_agent.stream({
-            "user_input": data.to_k8s_overview_str(),
-            "ce_instructions": data.ce_instructions,
-            "steady_states": hypothesis.steady_states.to_overview_str(),
-            "fault_scenario": hypothesis.fault.to_overview_str()},
-            {"callbacks": [logger]}
-        ):
+        def display_time_schedule(time_schedule: dict) -> Tuple[str, str, str, str, str]:
             if (time_schedule_thought := time_schedule.get("thought")) is not None:
                 plan_container["time_schedule_thought"].write(time_schedule_thought)
             if (total_time := time_schedule.get("total_time")) is not None:
@@ -221,6 +223,18 @@ class ExperimentPlanAgent:
             if (post_validation_time := time_schedule.get("post_validation_time")) is not None:
                 plan_container["post_validation_time"].write(f"Post-validation Phase: ```{post_validation_time}```")
                 plan_container["post_validation_header"].write(f"###### :green-background[Post-validation Phase ({post_validation_time})]")
+            return time_schedule_thought, total_time, pre_validation_time, fault_injection_time, post_validation_time
+
+        for time_schedule in self.time_schedule_agent.stream({
+            "user_input": data.to_k8s_overview_str(),
+            "ce_instructions": data.ce_instructions,
+            "steady_states": hypothesis.steady_states.to_overview_str(),
+            "fault_scenario": hypothesis.fault.to_overview_str()},
+            {"callbacks": [logger]}
+        ):
+            if debouncer.should_update():
+                display_time_schedule(time_schedule)
+        time_schedule_thought, total_time, pre_validation_time, fault_injection_time, post_validation_time = display_time_schedule(time_schedule)
 
         #---------------------------------------------------------------------------
         # plan pre-validation, fault-injection, post-validation phases sequentially
@@ -234,7 +248,9 @@ class ExperimentPlanAgent:
             "phase_total_time": pre_validation_time},
             {"callbacks": [logger]}
         ):
-            self.display_phase_overview(pre_validation_plan, "pre_validation", plan_container)
+            if debouncer.should_update():
+                self.display_phase_overview(pre_validation_plan, "pre_validation", plan_container)
+        self.display_phase_overview(pre_validation_plan, "pre_validation", plan_container)
 
         for fault_injection_plan in self.fault_injection_agent.stream({
             "user_input": data.to_k8s_overview_str(),
@@ -245,8 +261,10 @@ class ExperimentPlanAgent:
             "phase_total_time": fault_injection_time},
             {"callbacks": [logger]}
         ):
-            self.display_phase_overview(fault_injection_plan, "fault_injection", plan_container)
-        
+            if debouncer.should_update():
+                self.display_phase_overview(fault_injection_plan, "fault_injection", plan_container)
+        self.display_phase_overview(fault_injection_plan, "fault_injection", plan_container)
+
         for post_validation_plan in self.post_validation_agent.stream({
             "user_input": data.to_k8s_overview_str(),
             "ce_instructions": data.ce_instructions,
@@ -256,7 +274,9 @@ class ExperimentPlanAgent:
             "phase_total_time": post_validation_time},
             {"callbacks": [logger]}    
         ):
-            self.display_phase_overview(post_validation_plan, "post_validation", plan_container)
+            if debouncer.should_update():
+                self.display_phase_overview(post_validation_plan, "post_validation", plan_container)
+        self.display_phase_overview(post_validation_plan, "post_validation", plan_container)
 
         #-------------------
         # add workflow name
@@ -279,8 +299,11 @@ class ExperimentPlanAgent:
             "post_validation_overview": post_validation_overview},
             {"callbacks": [logger]}
         ):
-            if (summary_str := summary.get("summary")) is not None:
-                plan_container["summary"].write(summary_str)
+            if debouncer.should_update():
+                if (summary_str := summary.get("summary")) is not None:
+                    plan_container["summary"].write(summary_str)
+        summary_str = summary.get("summary")
+        plan_container["summary"].write(summary_str)
 
         #----------
         # epilogue

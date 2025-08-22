@@ -12,7 +12,9 @@ from ....utils.functions import (
     write_file,
     type_cmd3,
     limit_string_length,
+    StreamDebouncer
 )
+
 
 SYS_REFINE_FAULT = """\
 You are a helpful AI assistant for Chaos Engineering.
@@ -195,8 +197,19 @@ class FaultRefiner:
         if mod_count == -1:
             display_container.create_subsubcontainer(subcontainer_id="fault_params", subsubcontainer_id=f"fault_type{idx}")
             display_container.create_subsubcontainer(subcontainer_id="fault_params", subsubcontainer_id=f"fault_params{idx}")
-        result = {}
-        for token in agent.stream({
+        
+        debouncer = StreamDebouncer()
+
+        result = {}        
+        def display_response(response: dict) -> None:
+            for key in fault_params.__fields__.keys():
+                key_item = response.get(key)
+                if key_item is not None and isinstance(key_item, Iterable) and len(key_item) > 0:
+                    result[key] = key_item
+                    display_container.update_subsubcontainer(f"Detailed parameters of ```{fault['name']}``` ({fault['scope']})", f"fault_type{idx}")
+                    display_container.update_subsubcontainer(result, f"fault_params{idx}")
+
+        for response in agent.stream({
             "user_input": user_input,
             "ce_instructions": ce_instructions,
             "steady_states": steady_states,
@@ -205,12 +218,9 @@ class FaultRefiner:
             "ce_tool_name": self.ce_tool.name},
             {"callbacks": [self.logger]}
         ):
-            for key in fault_params.__fields__.keys():
-                key_item = token.get(key)
-                if key_item is not None and isinstance(key_item, Iterable) and len(key_item) > 0:
-                    result[key] = key_item
-                    display_container.update_subsubcontainer(f"Detailed parameters of ```{fault['name']}``` ({fault['scope']})", f"fault_type{idx}")
-                    display_container.update_subsubcontainer(result, f"fault_params{idx}")
+            if debouncer.should_update():
+                display_response(response)
+        display_response(response)
         return result
     
     def convert_fault_senario_to_str(self, fault_scenario: Dict[str, str]) -> str:

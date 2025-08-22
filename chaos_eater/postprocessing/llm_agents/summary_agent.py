@@ -7,7 +7,7 @@ from ...improvement.improver import ReconfigurationResult
 from ...preprocessing.preprocessor import ProcessedData
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField, BaseModel
 from ...utils.llms import build_json_agent, LLMLog, LoggingCallback
-from ...utils.functions import int_to_ordinal, MessageLogger
+from ...utils.functions import int_to_ordinal, MessageLogger, StreamDebouncer
 
 
 CHAOS_CYCLE_OVERVIEW = """\
@@ -119,9 +119,16 @@ class SummaryAgent:
     
     def summarize(self, ce_cycle: ChaosCycle) -> Tuple[LLMLog, str]:
         logger = LoggingCallback(name="overall_summary", llm=self.llm)
+        debouncer = StreamDebouncer()
         expander = self.message_logger.expander("##### Summary of your k8s yaml", expanded=True)
         empty = expander.placeholder()
-        for summary in self.agent.stream({"ce_cycle_overview": ce_cycle.to_str()}, {"callbacks": [logger]}):
-            if (summary_str := summary.get("summary")) is not None:
-                empty.write(summary_str)
+        for summary in self.agent.stream(
+            {"ce_cycle_overview": ce_cycle.to_str()},
+            {"callbacks": [logger]}
+        ):
+            if debouncer.should_update():
+                if (summary_str := summary.get("summary")) is not None:
+                    empty.write(summary_str)
+        summary_str = summary.get("summary")
+        empty.write(summary_str)
         return logger.log, summary_str

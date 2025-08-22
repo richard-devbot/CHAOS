@@ -1,8 +1,9 @@
 from typing import Dict, Tuple
-import streamlit as st
+
 from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, BaseModel, Field
 from ....utils.llms import build_json_agent, LoggingCallback, LLMLog
+from ....utils.functions import StreamDebouncer, MessageLogger
 
 
 #---------
@@ -52,13 +53,20 @@ class SteadyStateCompletionCheckAgent:
         self,
         input_data: ProcessedData,
         predefined_steady_states: list,
+        message_logger: MessageLogger
     ) -> Tuple[LLMLog, Dict[str, str]]:
         logger = LoggingCallback(name="steady_state_completion_check", llm=self.llm)
-        
-        with st.container(border=True):
-            st.write("##### Steady state completion check")
-            thought_empty = st.empty()
-            check_empty = st.empty()
+        debouncer = StreamDebouncer()
+        container = message_logger.container(border=True)
+        container.write("##### Steady state completion check")
+        thought_empty = container.placeholder()
+        check_empty = container.placeholder()
+
+        def display_responce(responce) -> None:
+            if (thought := completion_check["thought"]) is not None:
+                thought_empty.write(thought)
+            if (check := completion_check["requires_addition"]) is not None:
+                check_empty.write(f"An additional steady state is needed?: ```{check}```")
 
         for completion_check in self.agent.stream({
             "user_input": input_data.to_k8s_overview_str(), 
@@ -66,8 +74,7 @@ class SteadyStateCompletionCheckAgent:
             "predefined_steady_states": predefined_steady_states.to_str()},
             {"callbacks": [logger]}
         ):
-            if (thought := completion_check["thought"]) is not None:
-                thought_empty.write(thought)
-            if (check := completion_check["requires_addition"]) is not None:
-                check_empty.write(f"An additional steady state is needed?: ```{check}```")
+            if debouncer.should_update():
+                display_responce(completion_check)
+        display_responce(completion_check)
         return logger.log, completion_check

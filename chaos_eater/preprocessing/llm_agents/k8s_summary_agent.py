@@ -3,7 +3,7 @@ from typing import List, Tuple
 from ...utils.wrappers import LLM, BaseModel, Field
 from ...utils.llms import build_json_agent, LoggingCallback, LLMLog
 from ...utils.schemas import File
-from ...utils.functions import file_to_str, MessageLogger
+from ...utils.functions import file_to_str, MessageLogger, StreamDebouncer
 
 
 #---------
@@ -53,6 +53,7 @@ class K8sSummaryAgent:
 
     def summarize_manifests(self, k8s_yamls: List[File]) -> Tuple[LLMLog, List[str]]:
         self.logger = LoggingCallback(name="k8s_summary", llm=self.llm)
+        debouncer = StreamDebouncer()
         summaries = []
         for k8s_yaml in k8s_yamls:
             self.message_logger.write(f"```{k8s_yaml.fname}```")
@@ -61,9 +62,9 @@ class K8sSummaryAgent:
                 {"k8s_yaml": file_to_str(k8s_yaml)}, 
                 {"callbacks": [self.logger]}
             ):
-                if (summary_str := summary.get("k8s_summary")) is not None:
-                    pass
-                    # container.write(summary_str)
-            summaries.append(summary_str)
+                if debouncer.should_update():
+                    if (summary_str := summary.get("k8s_summary")) is not None:
+                        placeholder.write(summary_str)
             placeholder.write(summary_str)
+            summaries.append(summary_str)
         return self.logger.log, summaries

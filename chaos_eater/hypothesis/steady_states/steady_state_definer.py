@@ -205,6 +205,7 @@ class SteadyStateDefiner:
             check_log, check = self.completion_check_agent.check_steady_state_completion(
                 input_data=input_data,
                 predefined_steady_states=steady_states,
+                message_logger=self.message_logger
             )
             logs.append(check_log)
             prev_check_thought = check["thought"]
