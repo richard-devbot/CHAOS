@@ -1,9 +1,10 @@
 from typing import List, Tuple
 
 from ...utils.wrappers import LLM, BaseModel, Field
-from ...utils.llms import build_json_agent, LoggingCallback, LLMLog
+from ...utils.llms import build_json_agent, LoggingCallback, LLMLog, safe_get_response_field, safe_stream_response_extract
 from ...utils.schemas import File
 from ...utils.functions import MessageLogger, StreamDebouncer
+from typing import Union, Any
 
 
 #---------
@@ -62,28 +63,75 @@ class K8sWeaknessSummaryAgent:
         self.logger = LoggingCallback(name="k8s_summary", llm=self.llm)
         debouncer = StreamDebouncer()
         placeholder = self.message_logger.placeholder()
+        
+        final_output = None
         for output in self.agent.stream(
             {"k8s_yamls": self.get_k8s_yamls_str(k8s_yamls)},
             {"callbacks": [self.logger]}
         ):
+            final_output = output  # Keep track of the final output
             if debouncer.should_update():
                 placeholder.write(self.get_text(output))
-        placeholder.write(self.get_text(output))
-        return self.logger.log, self.get_text(output)
+        
+        # Use the final output for the final text generation
+        final_text = self.get_text(final_output) if final_output is not None else "No weakness summary generated."
+        placeholder.write(final_text)
+        return self.logger.log, final_text
     
-    def get_text(self, output: dict) -> str:
+    def get_text(self, output: Union[dict, str, Any]) -> str:
+        """
+        Safely extract text from the LLM response, handling different response formats from various providers.
+        """
+        if output is None:
+            return "No response received from the LLM."
+        
         text = ""
-        if (issues := output.get("issues")) is not None:
-            for i, issue in enumerate(issues):
-                if (name := issue.get("issue_name")) is not None:
-                    text += f"Issue #{i}: {name}\n"
-                if (details := issue.get("issue_details")) is not None:
-                    text += f"  - details: {details}\n"
-                if (manifests := issue.get("manifests")) is not None:
-                    text += f"  - manifests having the issues: {manifests}\n"
-                if (config := issue.get("problematic_config")) is not None:
-                    text += f"  - problematic config: {config}\n\n"
-        return text
+        
+        # Try to extract issues using safe response handling
+        issues = safe_get_response_field(output, "issues", None)
+        
+        # Handle case where issues might be None or not a list
+        if issues is None:
+            return "No weakness issues found in the response."
+        
+        # Handle case where issues is not a list
+        if not isinstance(issues, list):
+            # Try to parse if it's a string representation
+            if isinstance(issues, str):
+                try:
+                    import json
+                    parsed_issues = json.loads(issues)
+                    if isinstance(parsed_issues, list):
+                        issues = parsed_issues
+                    else:
+                        return f"Unexpected issues format: {str(issues)[:200]}..."
+                except (json.JSONDecodeError, ImportError):
+                    return f"Unexpected response format for issues: {str(issues)[:200]}..."
+            else:
+                return f"Unexpected response format for issues: {str(issues)[:200]}..."
+        
+        # Process each issue safely
+        for i, issue in enumerate(issues):
+            if not isinstance(issue, dict):
+                text += f"Issue #{i}: Invalid issue format\n"
+                continue
+                
+            # Safely extract each field from the issue
+            name = safe_get_response_field(issue, "issue_name")
+            details = safe_get_response_field(issue, "issue_details")
+            manifests = safe_get_response_field(issue, "manifests")
+            config = safe_get_response_field(issue, "problematic_config")
+            
+            if name:
+                text += f"Issue #{i}: {name}\n"
+            if details:
+                text += f"  - details: {details}\n"
+            if manifests:
+                text += f"  - manifests having the issues: {manifests}\n"
+            if config:
+                text += f"  - problematic config: {config}\n\n"
+        
+        return text if text.strip() else "No weakness issues extracted from the response."
 
     def get_k8s_yamls_str(self, k8s_yamls: List[File]) -> str:
         input_str = ""

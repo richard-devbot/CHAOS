@@ -1,7 +1,7 @@
 from typing import List, Tuple
 
 from ...utils.wrappers import LLM, BaseModel, Field
-from ...utils.llms import build_json_agent, LoggingCallback, LLMLog
+from ...utils.llms import build_json_agent, LoggingCallback, LLMLog, safe_stream_response_extract
 from ...utils.schemas import File
 from ...utils.functions import file_to_str, MessageLogger, StreamDebouncer
 
@@ -55,16 +55,34 @@ class K8sSummaryAgent:
         self.logger = LoggingCallback(name="k8s_summary", llm=self.llm)
         debouncer = StreamDebouncer()
         summaries = []
+        
         for k8s_yaml in k8s_yamls:
             self.message_logger.write(f"```{k8s_yaml.fname}```")
             placeholder = self.message_logger.placeholder()
+            
+            final_summary = None
             for summary in self.agent.stream(
                 {"k8s_yaml": file_to_str(k8s_yaml)}, 
                 {"callbacks": [self.logger]}
             ):
+                final_summary = summary  # Keep track of the final summary
                 if debouncer.should_update():
-                    if (summary_str := summary.get("k8s_summary")) is not None:
-                        placeholder.write(summary_str)
-            placeholder.write(summary_str)
-            summaries.append(summary_str)
+                    # Use safe extraction for streaming updates
+                    summary_str = safe_stream_response_extract(
+                        summary, 
+                        "k8s_summary", 
+                        "Generating summary..."
+                    )
+                    placeholder.write(summary_str)
+            
+            # Extract final summary with robust validation
+            final_summary_str = safe_stream_response_extract(
+                final_summary, 
+                "k8s_summary", 
+                f"Failed to generate summary for {k8s_yaml.fname}"
+            )
+            
+            placeholder.write(final_summary_str)
+            summaries.append(final_summary_str)
+            
         return self.logger.log, summaries

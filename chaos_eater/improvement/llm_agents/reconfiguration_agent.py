@@ -8,7 +8,7 @@ from ...hypothesis.hypothesizer import Hypothesis
 from ...preprocessing.preprocessor import ProcessedData
 from ...utils.constants import SKAFFOLD_YAML_TEMPLATE_PATH
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField, BaseModel
-from ...utils.llms import build_json_agent, LLMLog, LoggingCallback
+from ...utils.llms import build_json_agent, LLMLog, LoggingCallback, safe_get_response_field
 from ...utils.functions import (
     dict_to_str,
     file_list_to_str,
@@ -118,22 +118,34 @@ class ReconfigurationResult(BaseModel):
 
     def to_str(self) -> str:
         mod_k8s_list_str = ""
-        mod_k8s_yamls = self.mod_k8s_yamls["modified_k8s_yamls"]
-        for mod_k8s_yaml in mod_k8s_yamls:
-            if mod_k8s_yaml["mod_type"] == "delete":
+        
+        # Use safe field extraction to handle different response formats
+        modified_k8s_yamls = safe_get_response_field(self.mod_k8s_yamls, "modified_k8s_yamls")
+        if modified_k8s_yamls is None:
+            return "No modifications were generated."
+        
+        for mod_k8s_yaml in modified_k8s_yamls:
+            # Use safe field extraction for each yaml configuration
+            mod_type = safe_get_response_field(mod_k8s_yaml, "mod_type") if isinstance(mod_k8s_yaml, dict) else None
+            fname = safe_get_response_field(mod_k8s_yaml, "fname") if isinstance(mod_k8s_yaml, dict) else None
+            explanation = safe_get_response_field(mod_k8s_yaml, "explanation") if isinstance(mod_k8s_yaml, dict) else None
+            code = safe_get_response_field(mod_k8s_yaml, "code") if isinstance(mod_k8s_yaml, dict) else None
+            
+            if mod_type == "delete":
                 mod_k8s_list_str += DELETE_K8S_YAML_TEMPLAET.format(
-                    fname=mod_k8s_yaml["fname"],
-                    explanation=mod_k8s_yaml["explanation"]
+                    fname=fname or "unknown",
+                    explanation=explanation or "No explanation provided"
                 ) + "\n\n"
             else:
                 mod_k8s_list_str += CREATE_REPLACE_K8S_YAML_TEMPLATE.format(
-                    fname=mod_k8s_yaml["fname"],
-                    mod_type=mod_k8s_yaml["mod_type"],
-                    explanation=mod_k8s_yaml["explanation"],
-                    mod_k8s_yaml=mod_k8s_yaml["code"]
+                    fname=fname or "unknown",
+                    mod_type=mod_type or "unknown",
+                    explanation=explanation or "No explanation provided",
+                    mod_k8s_yaml=code or "# No code provided"
                 ) + "\n\n"
+        
         return remove_curly_braces(MOD_K8S_YAML_OVERVIEW_TEMPLATE.format(
-            num_mod_k8s_yamls=len(mod_k8s_yamls),
+            num_mod_k8s_yamls=len(modified_k8s_yamls),
             mod_k8s_yaml_list=mod_k8s_list_str
         ))
 
@@ -199,13 +211,30 @@ class ReconfigurationAgent:
             # copy the previous project to the current project dir
             mod_dir = f"{work_dir}/mod_{mod_count}"
             copy_dir(mod_dir_history[-1], mod_dir) # duplicate the input project
+            
+            # Validate mod_k8s_yamls response and extract modified_k8s_yamls safely
+            if mod_k8s_yamls is None:
+                raise ValueError("Reconfiguration failed: No response received from LLM agent")
+            
+            # Use safe field extraction to handle different response formats
+            reconfig_yamls = safe_get_response_field(mod_k8s_yamls, "modified_k8s_yamls")
+            if reconfig_yamls is None:
+                raise ValueError("Reconfiguration failed: No modified_k8s_yamls found in LLM response")
+            
             # modify k8s yamls
-            reconfig_yamls = mod_k8s_yamls["modified_k8s_yamls"]
             for mod_k8s_yaml in reconfig_yamls:
-                mod_type = mod_k8s_yaml["mod_type"]
-                fpath = f"{mod_dir}/{mod_k8s_yaml['fname']}"
+                # Use safe field extraction for nested fields  
+                mod_type = safe_get_response_field(mod_k8s_yaml, "mod_type") if isinstance(mod_k8s_yaml, dict) else None
+                fname = safe_get_response_field(mod_k8s_yaml, "fname") if isinstance(mod_k8s_yaml, dict) else None
+                code = safe_get_response_field(mod_k8s_yaml, "code") if isinstance(mod_k8s_yaml, dict) else None
+                
+                if mod_type is None or fname is None:
+                    continue  # Skip invalid entries
+                    
+                fpath = f"{mod_dir}/{fname}"
                 if mod_type in ["create", "replace"]:
-                    write_file(fpath, mod_k8s_yaml['code'])
+                    if code is not None:
+                        write_file(fpath, code)
                 elif mod_type == "delete":
                     delete_file(fpath)
                 else:
@@ -216,18 +245,22 @@ class ReconfigurationAgent:
             for k8s_yaml in k8s_yamls_history[-1]:
                 is_found = False
                 for reconfig_yaml in reconfig_yamls:
-                    if reconfig_yaml["fname"] == k8s_yaml.fname:
-                        mod_type = reconfig_yaml["mod_type"]
-                        if mod_type == "replace":
+                    # Use safe field extraction for comparison
+                    reconfig_fname = safe_get_response_field(reconfig_yaml, "fname") if isinstance(reconfig_yaml, dict) else None
+                    reconfig_mod_type = safe_get_response_field(reconfig_yaml, "mod_type") if isinstance(reconfig_yaml, dict) else None
+                    reconfig_code = safe_get_response_field(reconfig_yaml, "code") if isinstance(reconfig_yaml, dict) else None
+                    
+                    if reconfig_fname == k8s_yaml.fname:
+                        if reconfig_mod_type == "replace":
                             k8s_yamls.append(File(
-                                path=f"{mod_dir}/{reconfig_yaml['fname']}",
-                                content=reconfig_yaml["code"],
+                                path=f"{mod_dir}/{reconfig_fname}",
+                                content=reconfig_code or "",
                                 work_dir=mod_dir,
                                 fname=k8s_yaml.fname
                             ))
                             is_found = True
                             break
-                        elif mod_type == "delete":
+                        elif reconfig_mod_type == "delete":
                             is_found = True
                             break
                 if not is_found:
@@ -241,12 +274,17 @@ class ReconfigurationAgent:
             # new_yamls
             for reconfig_yaml in reconfig_yamls:
                 print(reconfig_yaml)
-                if reconfig_yaml["mod_type"] == "create":
+                # Use safe field extraction for new yamls
+                reconfig_mod_type = safe_get_response_field(reconfig_yaml, "mod_type") if isinstance(reconfig_yaml, dict) else None
+                reconfig_fname = safe_get_response_field(reconfig_yaml, "fname") if isinstance(reconfig_yaml, dict) else None
+                reconfig_code = safe_get_response_field(reconfig_yaml, "code") if isinstance(reconfig_yaml, dict) else None
+                
+                if reconfig_mod_type == "create" and reconfig_fname is not None:
                     k8s_yamls.append(File(
-                        path=f"{mod_dir}/{reconfig_yaml['fname']}",
-                        content=reconfig_yaml["code"],
+                        path=f"{mod_dir}/{reconfig_fname}",
+                        content=reconfig_code or "",
                         work_dir=mod_dir,
-                        fname=reconfig_yaml["fname"]
+                        fname=reconfig_fname
                     ))
             # modify skaffold
             new_skaffold_path = f"{mod_dir}/{input_data.input.skaffold_yaml.fname}"
@@ -349,9 +387,13 @@ class ReconfigurationAgent:
         debouncer = StreamDebouncer()
 
         def display_response(response: dict) -> None:
-            if (thought := response.get("thought")) is not None:
+            # Use safe field extraction to handle different response formats
+            thought = safe_get_response_field(response, "thought")
+            if thought is not None:
                 thought_box.write(thought)
-            if (modified_k8s_yamls := response.get("modified_k8s_yamls")) is not None:
+            
+            modified_k8s_yamls = safe_get_response_field(response, "modified_k8s_yamls")
+            if modified_k8s_yamls is not None:
                 for i, mod_k8s_yaml in enumerate(modified_k8s_yamls):
                     if i + 1 > len(k8s_box):
                         k8s_box.append({
@@ -360,13 +402,20 @@ class ReconfigurationAgent:
                             "explanation": expander.placeholder(),
                             "code": expander.placeholder(),
                         })
-                    if (mod_type := mod_k8s_yaml.get("mod_type")) is not None:
+                    
+                    # Use safe field extraction for nested fields
+                    mod_type = safe_get_response_field(mod_k8s_yaml, "mod_type") if isinstance(mod_k8s_yaml, dict) else None
+                    fname = safe_get_response_field(mod_k8s_yaml, "fname") if isinstance(mod_k8s_yaml, dict) else None
+                    explanation = safe_get_response_field(mod_k8s_yaml, "explanation") if isinstance(mod_k8s_yaml, dict) else None
+                    code = safe_get_response_field(mod_k8s_yaml, "code") if isinstance(mod_k8s_yaml, dict) else None
+                    
+                    if mod_type is not None:
                         k8s_box[i]["mod_type"].write(f"Modification_type: {mod_type}")
-                    if (fname := mod_k8s_yaml.get("fname")) is not None:
+                    if fname is not None:
                         k8s_box[i]["fname"].write(f"File name: {fname}")
-                    if (explanation := mod_k8s_yaml.get("explanation")) is not None:
+                    if explanation is not None:
                         k8s_box[i]["explanation"].write(explanation)
-                    if (code := mod_k8s_yaml.get("code")) is not None:
+                    if code is not None:
                         k8s_box[i]["code"].code(code, language="yaml")
 
         for mod_k8s_yamls in agent.stream({
@@ -378,6 +427,11 @@ class ReconfigurationAgent:
         ):
             if debouncer.should_update():
                 display_response(mod_k8s_yamls)
+        
+        # Ensure we have a valid final response
+        if mod_k8s_yamls is None:
+            raise ValueError("Reconfiguration failed: No final response received from LLM streaming")
+            
         display_response(mod_k8s_yamls)
         return mod_k8s_yamls
     
@@ -432,9 +486,13 @@ class ReconfigurationAgent:
         debouncer = StreamDebouncer()
 
         def display_responce(response: dict) -> None:
-            if (thought := response.get("thought")) is not None:
+            # Use safe field extraction to handle different response formats
+            thought = safe_get_response_field(response, "thought")
+            if thought is not None:
                 thought_box.write(thought)
-            if (modified_k8s_yamls := response.get("modified_k8s_yamls")) is not None:
+            
+            modified_k8s_yamls = safe_get_response_field(response, "modified_k8s_yamls")
+            if modified_k8s_yamls is not None:
                 for i, mod_k8s_yaml in enumerate(modified_k8s_yamls):
                     if i + 1 > len(k8s_box):
                         k8s_box.append({
@@ -443,13 +501,20 @@ class ReconfigurationAgent:
                             "explanation": expander.placeholder(),
                             "code": expander.placeholder(),
                         })
-                    if (mod_type := mod_k8s_yaml.get("mod_type")) is not None:
+                    
+                    # Use safe field extraction for nested fields
+                    mod_type = safe_get_response_field(mod_k8s_yaml, "mod_type") if isinstance(mod_k8s_yaml, dict) else None
+                    fname = safe_get_response_field(mod_k8s_yaml, "fname") if isinstance(mod_k8s_yaml, dict) else None
+                    explanation = safe_get_response_field(mod_k8s_yaml, "explanation") if isinstance(mod_k8s_yaml, dict) else None
+                    code = safe_get_response_field(mod_k8s_yaml, "code") if isinstance(mod_k8s_yaml, dict) else None
+                    
+                    if mod_type is not None:
                         k8s_box[i]["mod_type"].write(f"Modification_type: {mod_type}")
-                    if (fname := mod_k8s_yaml.get("fname")) is not None:
+                    if fname is not None:
                         k8s_box[i]["fname"].write(f"File name: {fname}")
-                    if (explanation := mod_k8s_yaml.get("explanation")) is not None:
+                    if explanation is not None:
                         k8s_box[i]["explanation"].write(explanation)
-                    if (code := mod_k8s_yaml.get("code")) is not None:
+                    if code is not None:
                         k8s_box[i]["code"].code(code, language="yaml")
 
         for mod_k8s_yamls in agent.stream({
@@ -461,5 +526,10 @@ class ReconfigurationAgent:
         ):
             if debouncer.should_update():
                 display_responce(mod_k8s_yamls)
+        
+        # Ensure we have a valid final response
+        if mod_k8s_yamls is None:
+            raise ValueError("Reconfiguration debugging failed: No final response received from LLM streaming")
+            
         display_responce(mod_k8s_yamls)
         return mod_k8s_yamls

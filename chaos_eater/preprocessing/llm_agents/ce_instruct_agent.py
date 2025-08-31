@@ -1,8 +1,9 @@
 from typing import Tuple
 
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField
-from ...utils.llms import build_json_agent, LoggingCallback, LLMLog
+from ...utils.llms import build_json_agent, LoggingCallback, LLMLog, safe_stream_response_extract
 from ...utils.functions import MessageLogger, StreamDebouncer
+from typing import Tuple
 
 
 SYS_SUMMARIZE_CE_INSTRUCTIONS = """\
@@ -56,13 +57,28 @@ class CEInstructAgent:
         logger = LoggingCallback(name="ce_instruction_summary", llm=self.llm)
         debouncer = StreamDebouncer()
         placeholder = self.message_logger.placeholder()
+        
+        final_summary = None
         for summary in self.agent.stream(
             {"ce_instructions": ce_instructions},
             {"callbacks": [logger]}
         ):
+            final_summary = summary  # Keep track of the final summary
             if debouncer.should_update():
-                if (summary_str := summary.get("ce_instructions")) is not None:
-                    placeholder.write(summary_str)
-        summary_str = summary.get("ce_instructions")
-        placeholder.write(summary_str)
-        return logger.log, summary_str
+                # Use safe extraction for streaming updates
+                summary_str = safe_stream_response_extract(
+                    summary, 
+                    "ce_instructions", 
+                    "Processing CE instructions..."
+                )
+                placeholder.write(summary_str)
+        
+        # Extract final summary with robust validation
+        final_summary_str = safe_stream_response_extract(
+            final_summary, 
+            "ce_instructions", 
+            "Failed to generate CE instructions summary."
+        )
+        
+        placeholder.write(final_summary_str)
+        return logger.log, final_summary_str

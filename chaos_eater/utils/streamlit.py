@@ -593,9 +593,19 @@ class StreamlitUsageDisplayCallback(ChaosEaterCallback):
 
     def display_usage(self) -> None:
         UNIT = 1000
-        billing = st.session_state.input_tokens * PRICING_PER_TOKEN[self.model_name]["input"] + \
-                  st.session_state.output_tokens * PRICING_PER_TOKEN[self.model_name]["output"]
-        self.usage_container.write(f"Total billing: ${billing:.2f}  \nTotal tokens: {st.session_state.total_tokens/UNIT}k  \nInput tokens: {st.session_state.input_tokens/UNIT}k  \nOuput tokens: {st.session_state.output_tokens/UNIT}k")
+        # Check if model is in pricing table, if not default to 0 (free models like GitHub AI)
+        if self.model_name in PRICING_PER_TOKEN:
+            billing = st.session_state.input_tokens * PRICING_PER_TOKEN[self.model_name]["input"] + \
+                      st.session_state.output_tokens * PRICING_PER_TOKEN[self.model_name]["output"]
+        else:
+            billing = 0.0  # Default for models not in pricing (like GitHub AI)
+        
+        # Add free indicator for GitHub models
+        billing_text = f"Total billing: ${billing:.2f}"
+        if self.model_name.startswith("github/") or billing == 0.0:
+            billing_text += " (Free)"
+            
+        self.usage_container.write(f"{billing_text}  \nTotal tokens: {st.session_state.total_tokens/UNIT}k  \nInput tokens: {st.session_state.input_tokens/UNIT}k  \nOuput tokens: {st.session_state.output_tokens/UNIT}k")
 
     def display_usage_w_update(self, logs: List[LLMLog]) -> None:
         self.update(logs)
@@ -611,6 +621,7 @@ class StreamlitUsageDisplayCallback(ChaosEaterCallback):
         self.display_usage_w_update(logs)
 
     def on_experiment_replan_end(self, logs: List[LLMLog]) -> None:
+        
         self.display_usage_w_update(logs)
 
     def on_analysis_end(self, logs: List[LLMLog]) -> None:

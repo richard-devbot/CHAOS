@@ -2,7 +2,7 @@ from typing import Dict, Tuple
 
 from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, BaseModel, Field
-from ....utils.llms import build_json_agent, LoggingCallback, LLMLog
+from ....utils.llms import build_json_agent, LoggingCallback, LLMLog, safe_get_response_field
 from ....utils.functions import StreamDebouncer, MessageLogger
 
 
@@ -63,9 +63,13 @@ class SteadyStateCompletionCheckAgent:
         check_empty = container.placeholder()
 
         def display_responce(responce) -> None:
-            if (thought := completion_check["thought"]) is not None:
+            # Use safe field extraction to handle different response formats
+            thought = safe_get_response_field(responce, "thought")
+            check = safe_get_response_field(responce, "requires_addition")
+            
+            if thought is not None:
                 thought_empty.write(thought)
-            if (check := completion_check["requires_addition"]) is not None:
+            if check is not None:
                 check_empty.write(f"An additional steady state is needed?: ```{check}```")
 
         for completion_check in self.agent.stream({

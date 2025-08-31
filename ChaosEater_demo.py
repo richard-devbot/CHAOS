@@ -60,18 +60,26 @@ def init_choaseater(
     model_name: str = "openai/gpt-4o",
     temperature: float = 0.0,
     port: int = 8000,
-    seed: int = 42
+    seed: int = 42,
+    github_base_url: str = "https://models.github.ai/inference"
 ) -> None:
     provider = model_name.split("/")[0]
-    if provider in ["openai", "anthropic", "google"]:
-        if st.session_state.api_key != "":
-            os.environ[get_env_key_name(provider)] = st.session_state.api_key
+    if provider in ["openai", "anthropic", "google", "github"]:
+        if provider == "github":
+            if st.session_state.github_token != "":
+                os.environ["GITHUB_TOKEN"] = st.session_state.github_token
+            if st.session_state.github_base_url != "":
+                github_base_url = st.session_state.github_base_url
+        else:
+            if st.session_state.api_key != "":
+                os.environ[get_env_key_name(provider)] = st.session_state.api_key
     try:
         llm = load_llm(
             model_name=model_name, 
             temperature=temperature,
             port=port,
-            seed=seed
+            seed=seed,
+            github_base_url=github_base_url
         )
     except ModelNotFoundError:
         pull_model(model_name)
@@ -79,7 +87,8 @@ def init_choaseater(
             model_name=model_name, 
             temperature=temperature,
             port=port,
-            seed=seed
+            seed=seed,
+            github_base_url=github_base_url
         )
 
     st.session_state.chaoseater = ChaosEater(
@@ -132,6 +141,10 @@ def main():
         st.session_state.message_logger = StreamlitLogger()
     if "selected_cycle" not in st.session_state:
         st.session_state.selected_cycle = ""
+    if "github_token" not in st.session_state:
+        st.session_state.github_token = ""
+    if "github_base_url" not in st.session_state:
+        st.session_state.github_base_url = "https://models.github.ai/inference"
 
     #--------------
     # CSS settings
@@ -164,8 +177,10 @@ def main():
                 "Model", 
                 (
                     "openai/gpt-4o-2024-08-06",
-                    "google/gemini-1.5-pro-latest",
+                    "google/gemini-2.0-flash-lite",
                     "anthropic/claude-3-5-sonnet-20241022",
+                    "github/gpt-4o",
+                    "github/gpt-4o-mini",
                     "ollama/qwen3:32b",
                     "custom"
                 )
@@ -176,7 +191,28 @@ def main():
                     model_name = "openai/gpt-4o-2024-08-06"
             else:
                 model_name = selected_model
-            if model_name.startswith(("openai", "google", "anthropic")):
+            
+            # Handle different provider authentication
+            if model_name.startswith("github/"):
+                provider = "github"
+                has_valid_key = check_existing_key(provider)
+                if has_valid_key:
+                    help_text = "A valid GitHub token is already set"
+                else:
+                    help_text = "Enter your GitHub token"
+                st.text_input(
+                    label="GitHub Token",
+                    key="github_token",
+                    placeholder=help_text,
+                    type="password"
+                )
+                st.text_input(
+                    label="GitHub Base URL",
+                    key="github_base_url",
+                    value=st.session_state.github_base_url,
+                    placeholder="https://models.github.ai/inference"
+                )
+            elif model_name.startswith(("openai", "google", "anthropic")):
                 provider = model_name.split("/")[0]
                 has_valid_key = check_existing_key(provider)
                 if has_valid_key:

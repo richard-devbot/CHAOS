@@ -2,7 +2,7 @@ from typing import Dict, Tuple
 
 from ....preprocessing.preprocessor import ProcessedData
 from ....utils.wrappers import LLM, BaseModel, Field
-from ....utils.llms import build_json_agent, LoggingCallback, LLMLog
+from ....utils.llms import build_json_agent, LoggingCallback, LLMLog, safe_get_response_field
 from ....utils.streamlit import StreamlitContainer
 from ....utils.functions import StreamDebouncer
 
@@ -78,9 +78,13 @@ class SteadyStateDraftAgent:
         
         # define display function
         def display_response(response: dict) -> None:
-            if (thought := response["thought"]) is not None:
+            # Use safe field extraction to handle different response formats
+            thought = safe_get_response_field(response, "thought")
+            name = safe_get_response_field(response, "name")
+            
+            if thought is not None:
                 display_container.update_subsubcontainer(thought, container_id)
-            if (name := response["name"]) is not None:
+            if name is not None:
                 display_container.update_header(
                     f"##### Steady state #{predefined_steady_states.count+1}: {name}",
                     expanded=True

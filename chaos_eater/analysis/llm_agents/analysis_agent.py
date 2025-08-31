@@ -4,7 +4,7 @@ from ...preprocessing.preprocessor import ProcessedData
 from ...hypothesis.hypothesizer import Hypothesis
 from ...experiment.experimenter import ChaosExperiment, ChaosExperimentResult
 from ...utils.wrappers import LLM, LLMBaseModel, LLMField
-from ...utils.llms import build_json_agent, LLMLog, LoggingCallback
+from ...utils.llms import build_json_agent, LLMLog, LoggingCallback, safe_stream_response_extract
 from ...utils.functions import dict_to_str, MessageLogger, StreamDebouncer
 
 
@@ -98,6 +98,8 @@ class AnalysisAgent:
             )
 
 
+        analysis_report = None
+        last_token = None
         for token in agent.stream({
             "system_overview": input_data.to_k8s_overview_str(),
             "hypothesis_overview": hypothesis.to_str(),
@@ -105,9 +107,34 @@ class AnalysisAgent:
             "experiment_result": experiment_result.to_str()},
             {"callbacks": [logger]}
         ):
+            last_token = token
             if debouncer.should_update():
-                if (analysis := token.get("report")) is not None:
-                    empty.write(analysis)
-        analysis = token.get("report")
-        empty.write(analysis)
-        return logger.log, analysis
+                # Use safe extraction for streaming updates
+                analysis = safe_stream_response_extract(
+                    token, 
+                    "report", 
+                    "Analyzing experiment results..."
+                )
+                empty.write(analysis)
+                analysis_report = analysis
+        
+        # Get the final analysis report from the last token using robust validation
+        if analysis_report is None and last_token is not None:
+            analysis_report = safe_stream_response_extract(
+                last_token, 
+                "report", 
+                "Analysis failed: No report generated from the LLM response."
+            )
+        
+        # Final validation - use the utility function for consistency
+        if analysis_report is not None and isinstance(analysis_report, str):
+            final_analysis = analysis_report
+        else:
+            final_analysis = safe_stream_response_extract(
+                last_token,
+                "report",
+                "Analysis failed: No report generated from the LLM response."
+            )
+        
+        empty.write(final_analysis)
+        return logger.log, final_analysis
