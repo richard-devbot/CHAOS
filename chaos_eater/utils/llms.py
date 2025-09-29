@@ -10,6 +10,7 @@ from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_anthropic import ChatAnthropic
 from langchain_ollama import ChatOllama
+from langchain_aws import ChatBedrockConverse
 from langchain.prompts import ChatPromptTemplate
 from langchain_core.runnables.base import Runnable
 from langchain_core.output_parsers import JsonOutputParser
@@ -169,6 +170,18 @@ def load_llm(
             temperature=temperature,
             max_tokens=8192
             # model_kwargs=model_kwargs
+        )
+    elif model_name.startswith("bedrock/"):
+        model_id = model_name.split("bedrock/", 1)[1]
+        return ChatBedrockConverse(
+            model_id=model_id,
+            temperature=temperature,
+            region_name=os.environ.get("AWS_REGION", "us-east-1"),
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+            aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
+            max_tokens=4096,  # Default, adjustable
+            # Other params like additional_model_request_fields can be added if needed
         )
     elif model_name.startswith("github/"):
         return ChatOpenAI(
@@ -408,10 +421,15 @@ PRICING_PER_TOKEN = {
         "input": 0.0 / UNIT,  # GitHub AI models are free for now
         "output": 0.0 / UNIT
     },
+    "bedrock/anthropic.claude-3-5-sonnet-20241022": {
+        "input": 3.0 / UNIT,  # Approx $0.003 per 1k input tokens
+        "output": 15.0 / UNIT  # Approx $0.015 per 1k output tokens
+    },
+    # Add more Bedrock models as needed, e.g., "bedrock/anthropic.claude-3-opus-20240229-v1:0"
 }
 
-def verify_api_key(provider: str, api_key: str) -> bool:
-    if not api_key:
+def verify_api_key(provider: str, api_key: str = None, **kwargs) -> bool:
+    if not api_key and provider != "bedrock":
         return False
     try:
         if provider == "openai":
@@ -450,6 +468,32 @@ def verify_api_key(provider: str, api_key: str) -> bool:
                 timeout=5
             )
             return response.status_code == 200
+        elif provider == "bedrock":
+            # For Bedrock, use kwargs for multiple creds or env vars
+            try:
+                # Temporarily set env vars for validation
+                temp_access = kwargs.get('aws_access_key_id') or os.environ.get("AWS_ACCESS_KEY_ID")
+                temp_secret = kwargs.get('aws_secret_access_key') or os.environ.get("AWS_SECRET_ACCESS_KEY")
+                temp_token = kwargs.get('aws_session_token') or os.environ.get("AWS_SESSION_TOKEN")
+                temp_region = kwargs.get('region_name') or os.environ.get("AWS_REGION", "us-east-1")
+                
+                if not temp_access or not temp_secret:
+                    return False
+                
+                llm = ChatBedrockConverse(
+                    model_id="anthropic.claude-3-5-sonnet-20241022",  # Test model
+                    temperature=0.0,
+                    region_name=temp_region,
+                    aws_access_key_id=temp_access,
+                    aws_secret_access_key=temp_secret,
+                    aws_session_token=temp_token if temp_token else None,
+                )
+                # Try a simple invoke to validate (minimal messages)
+                messages = [("human", "Hello")]
+                llm.invoke(messages)
+                return True
+            except Exception:
+                return False
     except Exception:
         return False
     return False
@@ -459,14 +503,22 @@ def get_env_key_name(provider: str) -> str:
         "openai": "OPENAI_API_KEY",
         "google": "GOOGLE_API_KEY",
         "anthropic": "ANTHROPIC_API_KEY",
-        "github": "GITHUB_TOKEN"
+        "github": "GITHUB_TOKEN",
+        "bedrock": "AWS_ACCESS_KEY_ID"  # Primary key, but multiple handled separately
     }
     return env_keys.get(provider, "API_KEY")
 
 def check_existing_key(provider: str) -> bool:
-    env_key_name = get_env_key_name(provider)
-    existing_key = os.environ.get(env_key_name)
-    if existing_key:
-        if verify_api_key(provider, existing_key):
-            return True
+    if provider == "bedrock":
+        access_key = os.environ.get("AWS_ACCESS_KEY_ID")
+        secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+        if access_key and secret_key:
+            return verify_api_key(provider, aws_access_key_id=access_key, aws_secret_access_key=secret_key)
+        return False
+    else:
+        env_key_name = get_env_key_name(provider)
+        existing_key = os.environ.get(env_key_name)
+        if existing_key:
+            if verify_api_key(provider, existing_key):
+                return True
     return False
