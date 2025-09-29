@@ -1,9 +1,12 @@
 import os
+import os
 import time
 import yaml
 import zipfile
 import subprocess
 from pathlib import Path
+from datetime import datetime
+import json
 
 import streamlit as st
 import redis
@@ -73,9 +76,23 @@ def init_choaseater(
         else:
             if st.session_state.api_key != "":
                 os.environ[get_env_key_name(provider)] = st.session_state.api_key
+    elif provider == "bedrock":
+        # Set AWS env vars from session_state if provided
+        if hasattr(st.session_state, 'aws_access_key_id') and st.session_state.aws_access_key_id != "":
+            os.environ["AWS_ACCESS_KEY_ID"] = st.session_state.aws_access_key_id
+        if hasattr(st.session_state, 'aws_secret_access_key') and st.session_state.aws_secret_access_key != "":
+            os.environ["AWS_SECRET_ACCESS_KEY"] = st.session_state.aws_secret_access_key
+        if hasattr(st.session_state, 'aws_session_token') and st.session_state.aws_session_token != "":
+            os.environ["AWS_SESSION_TOKEN"] = st.session_state.aws_session_token
+        if hasattr(st.session_state, 'aws_region') and st.session_state.aws_region != "":
+            os.environ["AWS_REGION"] = st.session_state.aws_region
+        # Validate if keys are set
+        if not os.environ.get("AWS_ACCESS_KEY_ID") or not os.environ.get("AWS_SECRET_ACCESS_KEY"):
+            st.error("AWS Bedrock requires Access Key ID and Secret Access Key. Please provide them in the sidebar.")
+            return
     try:
         llm = load_llm(
-            model_name=model_name, 
+            model_name=model_name,
             temperature=temperature,
             port=port,
             seed=seed,
@@ -84,7 +101,7 @@ def init_choaseater(
     except ModelNotFoundError:
         pull_model(model_name)
         llm = load_llm(
-            model_name=model_name, 
+            model_name=model_name,
             temperature=temperature,
             port=port,
             seed=seed,
@@ -101,6 +118,91 @@ def init_choaseater(
     st.session_state.model_name = model_name
     st.session_state.temperature = temperature
     st.session_state.seed = seed
+
+def safe_yaml_load(content: str) -> dict:
+    """
+    Safely load YAML content, handling both single and multiple documents.
+    For multiple documents, returns the first document.
+    """
+    try:
+        # First try single document parsing
+        result = yaml.safe_load(content)
+        if result is None:
+            # Handle empty YAML files
+            documents = list(yaml.safe_load_all(content))
+            if documents and documents[0] is not None:
+                return documents[0]
+            else:
+                raise ValueError("No valid YAML documents found")
+        return result
+    except yaml.YAMLError:
+        # If that fails, try multi-document parsing and use the first document
+        try:
+            documents = list(yaml.safe_load_all(content))
+            if documents and documents[0] is not None:
+                return documents[0]  # Use the first document
+            else:
+                raise ValueError("No valid YAML documents found")
+        except yaml.YAMLError as e:
+            raise ValueError(f"Invalid YAML content: {str(e)}")
+
+def get_experiment_details(cycle_dir: str) -> dict:
+    """
+    Extract experiment details from a cycle directory
+    """
+    details = {
+        "status": "Unknown",
+        "duration": "N/A",
+        "timestamp": "N/A",
+        "model": "N/A",
+        "experiments_count": 0,
+        "success": False
+    }
+    
+    try:
+        # Check if output.json exists
+        output_path = os.path.join(cycle_dir, "outputs", "output.json")
+        if os.path.exists(output_path):
+            with open(output_path, 'r') as f:
+                data = json.load(f)
+                
+            # Extract basic info
+            if "model_name" in data:
+                details["model"] = data["model_name"]
+            
+            # Check experiment results
+            if "ce_cycle" in data and "result_history" in data["ce_cycle"]:
+                results = data["ce_cycle"]["result_history"]
+                details["experiments_count"] = len(results)
+                if results:
+                    details["success"] = results[-1].get("all_tests_passed", False)
+                    details["status"] = "Success" if details["success"] else "Failed"
+            
+            # Calculate total duration
+            if "run_time" in data:
+                total_time = 0
+                for phase_times in data["run_time"].values():
+                    if isinstance(phase_times, list):
+                        total_time += sum(phase_times)
+                    elif isinstance(phase_times, (int, float)):
+                        total_time += phase_times
+                details["duration"] = f"{total_time:.1f}s"
+                        
+        # Get timestamp from directory name or file modification time
+        if cycle_dir.startswith("cycle_"):
+            timestamp_str = cycle_dir[6:]  # Remove "cycle_" prefix
+            try:
+                # Parse timestamp format: YYYYMMDD_HHMMSS
+                dt = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+                details["timestamp"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                # Fallback to file modification time
+                stat = os.stat(cycle_dir)
+                details["timestamp"] = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception as e:
+        print(f"Error getting experiment details for {cycle_dir}: {e}")
+    
+    return details
 
 def find_message_logs(root: str = "."):
     logs = {}
@@ -174,11 +276,12 @@ def main():
             # model selection
             #-----------------
             selected_model = st.selectbox(
-                "Model", 
+                "Model",
                 (
                     "openai/gpt-4o-2024-08-06",
                     "google/gemini-2.0-flash-lite",
                     "anthropic/claude-3-5-sonnet-20241022",
+                    "bedrock/anthropic.claude-3-5-sonnet-20241022",
                     "github/gpt-4o",
                     "github/gpt-4o-mini",
                     "ollama/qwen3:32b",
@@ -193,7 +296,48 @@ def main():
                 model_name = selected_model
             
             # Handle different provider authentication
-            if model_name.startswith("github/"):
+            if model_name.startswith("bedrock/"):
+                provider = "bedrock"
+                # For Bedrock, check if keys are set in session_state or env
+                has_valid_key = check_existing_key(provider)
+                with st.expander("AWS Bedrock Credentials", expanded=not has_valid_key):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.text_input(
+                            label="AWS Access Key ID",
+                            key="aws_access_key_id",
+                            placeholder="Enter your AWS Access Key ID",
+                            type="password",
+                            help="Required for Bedrock access"
+                        )
+                    with col2:
+                        st.text_input(
+                            label="AWS Secret Access Key",
+                            key="aws_secret_access_key",
+                            placeholder="Enter your AWS Secret Access Key",
+                            type="password",
+                            help="Required for Bedrock access"
+                        )
+                    col3, col4 = st.columns(2)
+                    with col3:
+                        session_token = st.text_input(
+                            label="AWS Session Token (optional)",
+                            key="aws_session_token",
+                            placeholder="Enter if using temporary credentials",
+                            type="password",
+                            help="Optional for temporary credentials"
+                        )
+                    with col4:
+                        region = st.text_input(
+                            label="AWS Region",
+                            key="aws_region",
+                            value="us-east-1",
+                            placeholder="us-east-1",
+                            help="Default: us-east-1"
+                        )
+                if has_valid_key:
+                    st.info("Valid AWS Bedrock credentials detected")
+            elif model_name.startswith("github/"):
                 provider = "github"
                 has_valid_key = check_existing_key(provider)
                 if has_valid_key:
@@ -261,21 +405,55 @@ def main():
         # history of cycles
         #-------------------
         clicked_cycle = None
-        with st.expander("Cycles", expanded=True):
+        with st.expander("📊 Recent Experiments", expanded=True):
             logs = find_message_logs(WORK_DIR)
-            sorted_logs = sorted(
-                logs.items(),
-                key=lambda x: os.path.getmtime(x[1]),
-                reverse=True
-            )
-            for name, path in sorted_logs:
-                if st.button(
-                    name,
-                    key=name,
-                    use_container_width=True,
-                    type="primary" if st.session_state.selected_cycle == name else "secondary"
-                ):
-                    clicked_cycle = (name, path)
+            if not logs:
+                st.info("🔬 No experiments found. Run your first chaos engineering cycle!")
+            else:
+                sorted_logs = sorted(
+                    logs.items(),
+                    key=lambda x: os.path.getmtime(x[1]),
+                    reverse=True
+                )
+                
+                for i, (name, path) in enumerate(sorted_logs[:10]):  # Show only last 10 experiments
+                    cycle_dir = os.path.dirname(os.path.dirname(path))  # Go up from outputs/message_log.pkl
+                    details = get_experiment_details(cycle_dir)
+                    
+                    # Create a more informative button label
+                    status_emoji = "✅" if details["success"] else "❌" if details["status"] == "Failed" else "⏳"
+                    button_label = f"{status_emoji} {name}"
+                    
+                    # Show experiment details in an expander for the first few experiments
+                    if i < 3:  # Show details for the 3 most recent
+                        with st.container():
+                            if st.button(
+                                button_label,
+                                key=f"cycle_{name}",
+                                use_container_width=True,
+                                type="primary" if st.session_state.selected_cycle == name else "secondary"
+                            ):
+                                clicked_cycle = (name, path)
+                            
+                            # Show experiment summary
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.caption(f"🤖 {details['model']}")
+                                st.caption(f"⏱️ {details['duration']}")
+                            with col2:
+                                st.caption(f"🧪 {details['experiments_count']} experiments")
+                                st.caption(f"📅 {details['timestamp'][:10]}")
+                            
+                            st.divider()
+                    else:
+                        # For older experiments, just show the button
+                        if st.button(
+                            button_label,
+                            key=f"cycle_{name}",
+                            use_container_width=True,
+                            type="primary" if st.session_state.selected_cycle == name else "secondary"
+                        ):
+                            clicked_cycle = (name, path)
 
     if clicked_cycle:
         name, path = clicked_cycle
@@ -291,6 +469,34 @@ def main():
         #---------------------------
         with st.expander("Usage", expanded=True):
             st.session_state.usage_displayer = StreamlitUsageDisplayCallback(model_name)
+        
+        #--------------------------
+        # experiment monitoring
+        #--------------------------
+        with st.expander("🔍 Experiment Monitoring", expanded=False):
+            st.markdown("**Monitoring Options:**")
+            
+            # Check if we're in a containerized environment (common for AWS EC2)
+            if os.path.exists("/.dockerenv") or os.environ.get("container"):
+                st.info("🌍 **Running in container/EC2**")
+                st.markdown("To access experiment monitoring:")
+                st.code("http://<YOUR_EC2_IP>:2333", language="text")
+                st.caption("⚠️ Make sure port 2333 is open in your EC2 security group")
+            else:
+                st.info("🖥️ **Local environment**")
+                st.markdown("Experiment monitoring available at:")
+                st.code("http://localhost:2333", language="text")
+                
+            # Show recent experiment files location
+            st.markdown("**📁 Results Storage:**")
+            st.code(f"{WORK_DIR}/cycle_YYYYMMDD_HHMMSS/", language="text")
+            
+            if st.button("📂 Open Results Folder", use_container_width=True):
+                if os.path.exists(WORK_DIR):
+                    # For demonstration, show the path
+                    st.success(f"Results stored in: {os.path.abspath(WORK_DIR)}")
+                else:
+                    st.warning("No experiments found yet")
         
         #-----------------
         # command history
@@ -375,9 +581,20 @@ def main():
             files=project_files_tmp,
             ce_instructions=instructions
         )
-        skaffold_yaml_dir = os.path.dirname(skaffold_yaml.path)
+        if skaffold_yaml is None:
+            st.error("Error parsing skaffold.yaml: skaffold_yaml is None")
+            return
+            
+        skaffold_yaml_dir = os.path.dirname(skaffold_yaml.path or "")
         k8s_yamls_tmp = []
-        for k8s_yaml_fname in yaml.safe_load(skaffold_yaml.content)["manifests"]["rawYaml"]:
+        try:
+            skaffold_config = safe_yaml_load(str(skaffold_yaml.content))
+            raw_yaml_paths = skaffold_config.get("manifests", {}).get("rawYaml", [])
+        except ValueError as e:
+            st.error(f"Error parsing skaffold.yaml: {e}")
+            return
+            
+        for k8s_yaml_fname in raw_yaml_paths:
             for file in project_files_tmp:
                 if f"{skaffold_yaml_dir}/{k8s_yaml_fname}" == file.path:
                     k8s_yamls_tmp.append(File(
@@ -443,45 +660,144 @@ def main():
             #----------------
             # file uploading
             #----------------
+            st.markdown("📁 **Upload Options:**")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("✅ **ZIP file**: Complete project with skaffold.yaml")
+            with col2: 
+                st.markdown("✅ **YAML file**: Individual K8s manifests (auto-generates skaffold.yaml)")
+            
             upload_col, submit_col = st.columns([10, 2], vertical_alignment="bottom")
             with upload_col:
                 file = st.file_uploader(
-                    "upload your project",
-                    type="zip",
+                    "upload your project (.zip or .yaml files)",
+                    type=["zip", "yaml", "yml"],
                     accept_multiple_files=False,
-                    label_visibility="hidden"
+                    label_visibility="hidden",
+                    help="📋 Supported formats:\n• ZIP: Complete project structure\n• YAML: Single or multi-document Kubernetes manifests\n• Multiple YAML documents separated by '---' are supported"
                 )
                 if file is not None:
                     project_files_tmp = []
-                    with zipfile.ZipFile(file, "r") as z:
-                        for file_info in z.infolist():
-                            # only process files, skip directories
-                            if not file_info.is_dir():
-                                with z.open(file_info) as file:
-                                    file_content = file.read()
-                                    if is_binary(file_content):
-                                        content = file_content
-                                    else:
-                                        content = file_content.decode('utf-8')
-                                    fpath = file_info.filename
-                                    if os.path.basename(fpath) == "skaffold.yaml":
-                                        skaffold_yaml = File(
-                                            path=fpath,
-                                            content=content,
-                                            work_dir=EXAMPLE_DIR,
-                                            fname=fpath.removeprefix(EXAMPLE_DIR)
-                                        )
-                                    else:
-                                        project_files_tmp.append(File(
-                                                path=fpath,
-                                                content=content,
-                                                work_dir=EXAMPLE_DIR,
-                                                fname=fpath.removeprefix(EXAMPLE_DIR)
-                                        ))
-                    st.session_state.input = ChaosEaterInput(
-                        skaffold_yaml=skaffold_yaml,
-                        files=project_files_tmp
-                    )
+                    skaffold_yaml = None
+                    
+                    try:
+                        # Handle different file types
+                        if file.name.endswith('.zip'):
+                            # Process ZIP file (existing logic with validation)
+                            with zipfile.ZipFile(file, "r") as z:
+                                for file_info in z.infolist():
+                                    # only process files, skip directories
+                                    if not file_info.is_dir():
+                                        with z.open(file_info) as zip_file:
+                                            file_content = zip_file.read()
+                                            if is_binary(file_content):
+                                                content = file_content
+                                            else:
+                                                content = file_content.decode('utf-8')
+                                            fpath = file_info.filename
+                                            
+                                            # Validate YAML content if it's a YAML file
+                                            if fpath.endswith(('.yaml', '.yml')):
+                                                try:
+                                                    # Test if it's valid YAML (single or multiple documents)
+                                                    content_str = content if isinstance(content, str) else content.decode('utf-8')
+                                                    if '---' in content_str:
+                                                        docs = list(yaml.safe_load_all(content_str))
+                                                        if not docs or all(doc is None for doc in docs):
+                                                            st.warning(f"⚠️ YAML file '{fpath}' contains no valid documents")
+                                                            continue
+                                                    else:
+                                                        doc = yaml.safe_load(content_str)
+                                                        if doc is None:
+                                                            st.warning(f"⚠️ YAML file '{fpath}' is empty or invalid")
+                                                            continue
+                                                except yaml.YAMLError as e:
+                                                    st.error(f"❌ Invalid YAML file '{fpath}': {str(e)}")
+                                                    continue
+                                            
+                                            if os.path.basename(fpath) == "skaffold.yaml":
+                                                skaffold_yaml = File(
+                                                    path=fpath,
+                                                    content=content,
+                                                    work_dir=EXAMPLE_DIR,
+                                                    fname=fpath.removeprefix(EXAMPLE_DIR).lstrip('/')
+                                                )
+                                            else:
+                                                project_files_tmp.append(File(
+                                                        path=fpath,
+                                                        content=content,
+                                                        work_dir=EXAMPLE_DIR,
+                                                        fname=fpath.removeprefix(EXAMPLE_DIR).lstrip('/')
+                                                ))
+                                                
+                        elif file.name.endswith(('.yaml', '.yml')):
+                            # Process single YAML file
+                            content = file.read().decode('utf-8')
+                            
+                            # Validate YAML content
+                            try:
+                                if '---' in content:
+                                    docs = list(yaml.safe_load_all(content))
+                                    if not docs or all(doc is None for doc in docs):
+                                        st.error(f"❌ YAML file '{file.name}' contains no valid documents")
+                                        st.stop()
+                                    st.info(f"📄 Detected {len([d for d in docs if d is not None])} YAML document(s) in {file.name}")
+                                else:
+                                    doc = yaml.safe_load(content)
+                                    if doc is None:
+                                        st.error(f"❌ YAML file '{file.name}' is empty or invalid")
+                                        st.stop()
+                            except yaml.YAMLError as e:
+                                st.error(f"❌ Invalid YAML file '{file.name}': {str(e)}")
+                                st.stop()
+                            
+                            if file.name == "skaffold.yaml":
+                                skaffold_yaml = File(
+                                    path=file.name,
+                                    content=content,
+                                    work_dir=EXAMPLE_DIR,
+                                    fname=file.name
+                                )
+                            else:
+                                # If it's not skaffold.yaml, create a minimal skaffold.yaml pointing to this file
+                                project_files_tmp.append(File(
+                                    path=file.name,
+                                    content=content,
+                                    work_dir=EXAMPLE_DIR,
+                                    fname=file.name
+                                ))
+                                
+                                # Create a minimal skaffold.yaml
+                                skaffold_content = f"""apiVersion: skaffold/v3
+kind: Config
+metadata:
+  name: uploaded-yaml
+manifests:
+  rawYaml:
+    - {file.name}
+"""
+                                skaffold_yaml = File(
+                                    path="skaffold.yaml",
+                                    content=skaffold_content,
+                                    work_dir=EXAMPLE_DIR,
+                                    fname="skaffold.yaml"
+                                )
+                                st.info(f"🔧 Auto-generated skaffold.yaml for your {file.name}")
+                        
+                        if skaffold_yaml is not None:
+                            st.session_state.input = ChaosEaterInput(
+                                skaffold_yaml=skaffold_yaml,
+                                files=project_files_tmp
+                            )
+                            st.success(f"✅ Successfully uploaded {file.name}!")
+                            if len(project_files_tmp) > 0:
+                                st.info(f"📦 Loaded {len(project_files_tmp)} additional file(s)")
+                        else:
+                            st.error("❌ No valid skaffold.yaml found. Please ensure your project contains a skaffold.yaml file.")
+                            
+                    except Exception as e:
+                        st.error(f"❌ Error processing {file.name}: {str(e)}")
+                        st.error("💡 **Tip**: Ensure your ZIP file contains a valid skaffold.yaml, or upload YAML files directly.")
             with submit_col:
                 st.text("")
                 if st.button("Submit w/o instructions", key="submit_"):
@@ -520,7 +836,8 @@ def main():
                 #-------------
                 with st.chat_message("user"):
                     st.session_state.message_logger.write("##### Your instructions for Chaos Engineering:", role="user")
-                    st.session_state.message_logger.write(input.ce_instructions, role="user")
+                    instructions = input.ce_instructions or "No specific instructions provided"
+                    st.session_state.message_logger.write(instructions, role="user")
                 #---------------------
                 # chaoseater response
                 #---------------------
